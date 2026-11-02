@@ -41,6 +41,8 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'tsconfig*.json'
               - 'eslint.config.*'
+              - 'Dockerfile'
+              - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
 
@@ -274,10 +276,12 @@ jobs:
           echo "E2E: $E2E_RESULT"
           echo "Docker: $DOCKER_RESULT"
 
-          if [ "$STATIC_RESULT" = "failure" ] || [ "$DB_DRIFT_RESULT" = "failure" ] || [ "$TEST_RESULT" = "failure" ] || [ "$E2E_RESULT" = "failure" ] || [ "$DOCKER_RESULT" = "failure" ]; then
-            echo "One or more required CI jobs failed."
-            exit 1
-          fi
+          for res in "$STATIC_RESULT" "$DB_DRIFT_RESULT" "$TEST_RESULT" "$E2E_RESULT" "$DOCKER_RESULT"; do
+            if [ "$res" = "failure" ] || [ "$res" = "cancelled" ]; then
+              echo "One or more required CI jobs failed or were cancelled (status: $res)."
+              exit 1
+            fi
+          done
           echo "All required CI jobs succeeded or were skipped as expected."
 
   publish:
