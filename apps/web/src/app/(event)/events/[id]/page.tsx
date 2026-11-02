@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, Suspense } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   useParams,
@@ -351,9 +352,12 @@ function EventSplitView({ event }: { event: EventItem }) {
             className="size-11 rounded-[8px] overflow-hidden bg-[#eff1f2] shrink-0 border border-[#dfe3e5] hover:opacity-90 transition-opacity"
             title="Về trang chủ"
           >
-            <img
+            <Image
               src={event.image}
               alt={event.title}
+              width={44}
+              height={44}
+              unoptimized
               className="w-full h-full object-cover"
             />
           </Link>
@@ -645,9 +649,12 @@ function EventSplitView({ event }: { event: EventItem }) {
                   >
                     {/* Left: Clean Thumbnail Stage Photo */}
                     <div className="w-[110px] sm:w-[124px] aspect-[16/10] rounded-[8px] overflow-hidden bg-[#eff1f2] shrink-0 border border-[#dfe3e5]">
-                      <img
+                      <Image
                         src={listing.viewFromSeatUrl}
                         alt={listing.section}
+                        width={124}
+                        height={78}
+                        unoptimized
                         className="w-full h-full object-cover"
                       />
                     </div>
@@ -851,10 +858,12 @@ function EventSplitView({ event }: { event: EventItem }) {
 
             {/* View From Seat preview */}
             <div className="rounded-[10px] overflow-hidden border border-[#dfe3e5] bg-[#141d23] aspect-[16/9] relative">
-              <img
+              <Image
                 src={selectedListing.viewFromSeatUrl}
                 alt="Góc nhìn thực tế từ chỗ ngồi"
-                className="w-full h-full object-cover"
+                fill
+                unoptimized
+                className="object-cover"
               />
               <span className="absolute bottom-2 left-2 px-2 py-1 rounded-[6px] bg-black/75 text-white text-[11px] font-semibold">
                 Góc nhìn thực tế sân khấu từ {selectedListing.section}

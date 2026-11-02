@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Search,
@@ -86,10 +87,12 @@ function EventGridCard({
     <div className="group relative flex flex-col">
       <div className="relative aspect-[5/4] w-full overflow-hidden rounded-[16px] bg-[#eff1f2]">
         <Link href={`/events/${event.id}`} className="block h-full w-full">
-          <img
+          <Image
             src={event.image}
             alt={event.title}
-            loading="lazy"
+            fill
+            unoptimized
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         </Link>
@@ -281,9 +284,13 @@ export default function HomePage() {
                     href={`/events/${ev.id}`}
                     className="block h-full w-full"
                   >
-                    <img
+                    <Image
                       src={ev.portraitImage || ev.image}
                       alt={ev.title}
+                      fill
+                      unoptimized
+                      priority
+                      sizes="(max-width: 640px) 100vw, 25vw"
                       className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
@@ -424,10 +431,12 @@ export default function HomePage() {
                   onClick={() => setSelectedCategory(cat.category)}
                   className="group relative aspect-[16/10] w-full overflow-hidden rounded-[14px] bg-[#141d23] text-left"
                 >
-                  <img
+                  <Image
                     src={cat.image}
                     alt={cat.title}
-                    loading="lazy"
+                    fill
+                    unoptimized
+                    sizes="(max-width: 640px) 50vw, 25vw"
                     className="h-full w-full object-cover brightness-75 transition-transform duration-300 group-hover:scale-105"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
@@ -539,19 +548,28 @@ export default function HomePage() {
           <div className="rounded-[12px] border border-[#dfe3e5] bg-white px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="flex items-center -space-x-3 shrink-0">
-                <img
+                <Image
                   src="/images/events/vn/ha-anh-tuan.jpg"
                   alt=""
+                  width={44}
+                  height={44}
+                  unoptimized
                   className="size-11 rounded-full object-cover border-2 border-white"
                 />
-                <img
+                <Image
                   src="/images/events/vn/my-tam.jpg"
                   alt=""
+                  width={44}
+                  height={44}
+                  unoptimized
                   className="size-11 rounded-full object-cover border-2 border-white"
                 />
-                <img
+                <Image
                   src="/images/events/vn/soobin.jpg"
                   alt=""
+                  width={44}
+                  height={44}
+                  unoptimized
                   className="size-11 rounded-full object-cover border-2 border-white"
                 />
               </div>

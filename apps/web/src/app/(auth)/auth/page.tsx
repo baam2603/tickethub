@@ -140,6 +140,7 @@ function AuthFlowContent() {
     },
   });
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- React Hook Form watch is intentional to preserve component runtime behavior
   const watchedPassword = watchReg("password");
 
   // Keep form value in sync when returning with prefilled identifier

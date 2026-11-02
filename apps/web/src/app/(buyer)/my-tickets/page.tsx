@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState, useEffect } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import QRCode from "qrcode";
@@ -115,9 +116,12 @@ function MyTicketsContent() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 sm:items-center">
-            <img
+            <Image
               src={activeEvent.image}
               alt={activeEvent.title}
+              width={128}
+              height={80}
+              unoptimized
               className="w-full sm:w-32 aspect-[16/10] object-cover rounded-[10px] bg-secondary shrink-0"
             />
             <div className="space-y-1.5">
@@ -181,9 +185,12 @@ function MyTicketsContent() {
           <div className="flex items-center gap-3">
             <div className="size-11 rounded-[10px] bg-background border border-border flex items-center justify-center text-foreground shrink-0 overflow-hidden">
               {qrDataUrl ? (
-                <img
+                <Image
                   src={qrDataUrl}
                   alt="Mã QR"
+                  width={40}
+                  height={40}
+                  unoptimized
                   className="size-10 object-contain"
                 />
               ) : (
@@ -238,9 +245,12 @@ function MyTicketsContent() {
             {/* QR Code Container */}
             <div className="bg-[#f8fafc] border border-slate-200 rounded-[14px] p-4 flex flex-col items-center justify-center">
               {qrDataUrl && (
-                <img
+                <Image
                   src={qrDataUrl}
                   alt={`QR Code ${orderCode}`}
+                  width={224}
+                  height={224}
+                  unoptimized
                   className="w-56 h-56 object-contain"
                 />
               )}
