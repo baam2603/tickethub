@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   ci:
     name: Lint, Test and Build
@@ -67,23 +71,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check format
+        run: pnpm format:check
+
       - name: Build shared package
         run: pnpm --filter @tickethub/shared build
 
       - name: Check lint
         run: pnpm lint
 
-      - name: Check lint (web)
-        run: pnpm --filter @tickethub/web lint
-
       - name: Typecheck
         run: pnpm typecheck
 
       - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level=high
-
-      - name: Check format
-        run: pnpm format:check
+        run: |
+          set +e
+          pnpm audit --prod --audit-level=high --json > /tmp/audit-stdout.json 2> /tmp/audit-stderr.log
+          AUDIT_EXIT=$?
+          set -e
+          node scripts/ci-audit-summary.mjs /tmp/audit-stdout.json /tmp/audit-stderr.log "$AUDIT_EXIT"
 
       - name: Check drizzle schema has no pending migration
         run: |
@@ -142,7 +148,7 @@ jobs:
 
       - name: Lowercase repository owner
         id: repo
-        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_OUTPUT
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
