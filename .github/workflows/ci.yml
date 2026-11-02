@@ -18,10 +18,88 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  ci:
-    name: Lint, Test and Build
+  changes:
+    name: Detect Changed Paths
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Filter path changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'apps/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig*.json'
+              - 'eslint.config.*'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/**'
+
+  static:
+    name: Static Analysis, Types & Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Build shared package
+        run: pnpm --filter @tickethub/shared build
+
+      - name: Check lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Audit production dependencies
+        run: |
+          set +e
+          pnpm audit --prod --audit-level=high --json > /tmp/audit-stdout.json 2> /tmp/audit-stderr.log
+          AUDIT_EXIT=$?
+          set -e
+          node scripts/ci-audit-summary.mjs /tmp/audit-stdout.json /tmp/audit-stderr.log "$AUDIT_EXIT"
+
+  db-drift:
+    name: Check Schema Drift
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Check drizzle schema migrations
+        run: |
+          pnpm --filter @tickethub/api db:generate
+          git diff --exit-code -- apps/api/drizzle
+          test -z "$(git ls-files --others --exclude-standard -- apps/api/drizzle)"
+
+  test:
+    name: Unit & Integration Tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -57,45 +135,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Check format
-        run: pnpm format:check
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
 
       - name: Build shared package
         run: pnpm --filter @tickethub/shared build
-
-      - name: Check lint
-        run: pnpm lint
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Audit production dependencies
-        run: |
-          set +e
-          pnpm audit --prod --audit-level=high --json > /tmp/audit-stdout.json 2> /tmp/audit-stderr.log
-          AUDIT_EXIT=$?
-          set -e
-          node scripts/ci-audit-summary.mjs /tmp/audit-stdout.json /tmp/audit-stderr.log "$AUDIT_EXIT"
-
-      - name: Check drizzle schema has no pending migration
-        run: |
-          pnpm --filter @tickethub/api db:generate
-          git diff --exit-code -- apps/api/drizzle
-          test -z "$(git ls-files --others --exclude-standard -- apps/api/drizzle)"
 
       - name: Run database migrations and seed
         run: |
@@ -105,25 +151,138 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+  e2e:
+    name: Playwright E2E Tests
+    needs: [changes, static, test]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tickethub
+          POSTGRES_PASSWORD: tickethub_secret
+          POSTGRES_DB: tickethub_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://tickethub:tickethub_secret@localhost:5432/tickethub_dev
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: tickethub-super-secret-development-jwt-key-2026-min-32-chars
+      ED25519_PRIVATE_KEY: MC4CAQAwBQYDK2VwBCIEIFXdummyed25519privatekeydevelopmentonly2026=
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: apps/web/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('apps/web/src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
+
       - name: Build monorepo
         run: pnpm build
 
-      - name: Install Playwright browsers
+      - name: Run database migrations and seed
+        run: |
+          pnpm --filter @tickethub/api db:migrate
+          pnpm --filter @tickethub/api db:seed
+
+      - name: Get Playwright version
+        id: playwright-version
+        run: |
+          PLAYWRIGHT_VERSION=$(node -p "require('./apps/web/package.json').devDependencies['@playwright/test'] || require('./node_modules/@playwright/test/package.json').version")
+          echo "version=$PLAYWRIGHT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browser binaries
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright browsers and system dependencies
         run: pnpm --filter @tickethub/web exec playwright install --with-deps chromium
 
-      - name: Run E2E tests
-        run: |
-          node apps/api/dist/main.js &
-          pnpm --filter @tickethub/web start &
-          sleep 5
-          pnpm --filter @tickethub/web test:e2e
+      - name: Run Playwright E2E tests
+        run: pnpm --filter @tickethub/web test:e2e --project=chromium
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+  docker:
+    name: Docker Build Check
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Build Docker image
         run: docker build -t tickethub-api:ci .
 
+  ci-result:
+    name: CI Result Aggregator
+    needs: [changes, static, db-drift, test, e2e, docker]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check required job status
+        run: |
+          STATIC_RESULT="${{ needs.static.result }}"
+          DB_DRIFT_RESULT="${{ needs.db-drift.result }}"
+          TEST_RESULT="${{ needs.test.result }}"
+          E2E_RESULT="${{ needs.e2e.result }}"
+          DOCKER_RESULT="${{ needs.docker.result }}"
+
+          echo "Static: $STATIC_RESULT"
+          echo "DB-Drift: $DB_DRIFT_RESULT"
+          echo "Test: $TEST_RESULT"
+          echo "E2E: $E2E_RESULT"
+          echo "Docker: $DOCKER_RESULT"
+
+          if [ "$STATIC_RESULT" = "failure" ] || [ "$DB_DRIFT_RESULT" = "failure" ] || [ "$TEST_RESULT" = "failure" ] || [ "$E2E_RESULT" = "failure" ] || [ "$DOCKER_RESULT" = "failure" ]; then
+            echo "One or more required CI jobs failed."
+            exit 1
+          fi
+          echo "All required CI jobs succeeded or were skipped as expected."
+
   publish:
     name: Publish Docker image to GHCR
-    needs: ci
+    needs: ci-result
     if: github.event_name == 'push' && github.ref == 'refs/heads/unstable'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -134,7 +293,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
