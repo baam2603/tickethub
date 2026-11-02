@@ -14,18 +14,32 @@
 
 ---
 
-## 2. Factual Strengths
-[Record verified strengths factually without diplomatic flattery.]
-- **Architecture & Data:** [Example: Correctly used database transaction with SELECT ... FOR UPDATE or shared Zod schemas in packages/shared]
-- **Testing:** [Example: Comprehensive integration tests added for new endpoints with full branch coverage]
-- **UI & Design Tokens:** [Example: Component adheres strictly to design tokens, no hardcoded styles]
+## 2. Automated Pre-Flight Verification Matrix
+[Populate from running bash .agents/skills/pr-reviewer/scripts/verify-pr.sh PR_NUMBER]
+
+| Verification Dimension | Result | Notes |
+| :--- | :--- | :--- |
+| Media URLs Reachable (Section 6) | [PASSED / FAILED / N/A] | [HTTP status codes or image links verified] |
+| Prettier Code Style | [PASSED / FAILED] | [Code style compliance] |
+| ESLint (Zero Warnings Enforced) | [PASSED / FAILED] | [ESLint status] |
+| TypeScript Strict Types | [PASSED / FAILED] | [tsc --noEmit status] |
+| Doc Parity & Root Tests | [PASSED / FAILED] | [API/ERD contract parity] |
+| Workspace Test Suites | [PASSED / FAILED] | [pnpm test status] |
 
 ---
 
-## 3. Severity Breakdown of Findings
+## 3. Static Diff Scanner Findings
+[Populate from running bash .agents/skills/pr-reviewer/scripts/scan-diff.sh PR_NUMBER]
+- **Status:** [CLEAN | ATTENTION REQUIRED | MANUAL AUDIT REQUIRED]
+- **Warnings Detected:** [List warnings: raw <img>, console.log, any casting, empty catch, etc.]
+- **Contextual Leads:** [List leads: localStorage usage, setTimeout, hex colors]
+
+---
+
+## 4. Severity Breakdown of Findings
 
 ### Severity: Blocker (Must be resolved before merging)
-[Infrastructure tampering, mock auth/data on client, race conditions in ticket booking, security leaks, broken database transactions, API/ERD contract violations]
+[Infrastructure tampering, mock auth/data on client, race conditions in ticket booking, security leaks, broken database transactions, API/ERD contract violations, compiler/test failures]
 
 - **Finding B1:** [Short finding title]
   - **Location:** `[FILE_PATH]:[LINE_NUMBER]` - [GitHub Permalink](https://github.com/[OWNER]/[REPO]/blob/[HEAD_COMMIT_SHA]/[FILE_PATH]#L[LINE_NUMBER])
@@ -33,8 +47,8 @@
   - **Expected Behavior:** [Specify how the system must behave according to specifications]
   - **Production Impact:** [Concrete consequences: race condition, data corruption, outage, security vulnerability]
 
-### Severity: Major (Significant architectural or business logic defect)
-[Missing resource ownership checks, unvalidated input, missing negative test cases, responsive layout breakage, missing loading states]
+### Severity: Major (Significant architectural or code debt defect)
+[Missing resource ownership checks, unhandled promises, empty catch blocks, ESLint warnings, raw <img> tags, arbitrary Tailwind hex colors, responsive layout breakage]
 
 - **Finding M1:** [Title]
   - **Location:** `[FILE_PATH]:[LINE_NUMBER]` - [GitHub Permalink](https://github.com/[OWNER]/[REPO]/blob/[HEAD_COMMIT_SHA]/[FILE_PATH]#L[LINE_NUMBER])
@@ -43,7 +57,7 @@
   - **Production Impact:** [Consequences]
 
 ### Severity: Minor (Code quality cleanup needed)
-[Careless any type usage, dead code/unused imports, redundant console.log, unmapped hex colors]
+[Careless any type usage, dead code/unused imports, redundant console.log]
 
 - **Finding N1:** [Description with file:line location]
 
@@ -54,19 +68,15 @@
 
 ---
 
-## 4. Visual Evidence & Anti-Tampering Check
-- **Anti-Tampering Guard:** [SECURE | VIOLATION]
-  - Details: [No changes to protected infrastructure / Detected edits in: .github/workflows/**, scripts/pr-gate-*, tests/pr-gate-*]
-- **UI Visual Evidence:** [PASS | FAIL | N/A]
-  - UI File Status: [PR modifies visual UI in apps/web/src/** / PR only modifies backend or logic files]
-  - Media Verification: [Images/videos verified and match code changes / Broken link / Missing media / Fraudulent N/A declaration]
+## 5. Ready-to-Run GitHub CLI Review Command
+[Pre-formatted command for PM execution]
 
----
-
-## 5. Technical Directives for Contributor
-[Provide architectural guidelines, pseudocode, function signatures, and acceptance criteria. STRICTLY NO COMPLETE DROP-IN CODE BLOCKS]
-- [ ] **Directive 1:** [Technical requirement, pattern specification, link to docs/API_CONTRACT.md or docs/DATA_MODEL.md]
-- [ ] **Directive 2:** [Concrete acceptance criteria for the contributor to verify]
+```bash
+gh pr review [PR_NUMBER] --request-changes -b "$(cat <<'EOF'
+[PASTE_CONTRIBUTOR_COMMENT_HERE]
+EOF
+)"
+```
 
 ---
 

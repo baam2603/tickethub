@@ -7,9 +7,9 @@ After reviewing your changes against Use Case [USE_CASE_ID], the API Contract, a
 ---
 
 #### 1. General Verification Status
-- **Local Technical Checks (Lint/Typecheck/Test):** [Passed / Action required]
-- **Visual Evidence (If UI changed):** [Verified / Please attach screenshots or video of the UI in action]
-- **Architectural Compliance:** [Adjustments needed for transactional integrity or access control]
+- **Pre-Flight Technical Checks:** [Passed / Action required on lint, typecheck, or tests]
+- **Visual Evidence (If UI changed):** [Verified / Please ensure Section 6 includes reachable image/video proof]
+- **Architectural Compliance:** [Adjustments needed for transactional integrity, Drizzle ORM usage, or access control]
 
 ---
 
@@ -39,6 +39,7 @@ Please reference the architecture documentation:
 - Use Case Specs: `docs/system-design/03-use-cases.md`
 - API Contract: `docs/API_CONTRACT.md`
 - Data Model: `docs/DATA_MODEL.md`
+- Design Tokens: `docs/DESIGN_TOKENS.md`
 
 *(Note: Per repository guidelines, reviewers provide requirements, pseudocode, and acceptance criteria rather than complete replacement code snippets, empowering you to craft and own the solution).*
 
