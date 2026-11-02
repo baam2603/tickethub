@@ -1,4 +1,3 @@
-
 .git
 .gitignore
 **/node_modules
@@ -10,3 +9,8 @@
 **/.env.*
 **/*.log
 **/*.tsbuildinfo
+playwright-report
+test-results
+coverage
+.turbo
+.superpowers

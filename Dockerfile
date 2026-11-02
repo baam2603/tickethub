@@ -1,30 +1,40 @@
+# Stage 1: Base image with pnpm
+FROM node:22-alpine AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
 
-# Build TicketHub Backend
-FROM node:22-bookworm-slim AS builder
-
+# Stage 2: Dependencies
+FROM base AS dependencies
 WORKDIR /app
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY packages/shared/package.json ./packages/shared/
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
-RUN npm install -g pnpm@12.11.2
-
-COPY . .
-
-RUN pnpm install --frozen-lockfile
-
-RUN pnpm --filter @tickethub/shared build \
-    && test -f packages/shared/dist/index.js \
-    && test -f packages/shared/dist/index.d.ts
-
+# Stage 3: Builder
+FROM dependencies AS builder
+WORKDIR /app
+COPY tsconfig.base.json ./
+COPY packages/shared ./packages/shared
+COPY apps/api ./apps/api
+RUN pnpm --filter @tickethub/shared build
 RUN pnpm --filter @tickethub/api build
+RUN pnpm --filter @tickethub/api deploy --prod /app/pruned
 
-# Run compiled API
-FROM node:22-bookworm-slim
-
+# Stage 4: Production runner
+FROM node:22-alpine AS runner
 WORKDIR /app
-
 ENV NODE_ENV=production
+ENV PORT=4000
 
-COPY --from=builder /app /app
+COPY --from=builder --chown=node:node /app/pruned /app
 
+USER node
 EXPOSE 4000
 
-CMD ["node", "apps/api/dist/main.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD node -e 'fetch("http://localhost:4000/health").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
+
+CMD ["node", "dist/main.js"]

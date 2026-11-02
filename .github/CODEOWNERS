@@ -1,0 +1,13 @@
+# Infrastructure
+.github/ @tickethub/infra
+Dockerfile @tickethub/infra
+docker/ @tickethub/infra
+
+# Backend
+apps/api/ @tickethub/backend
+
+# Frontend
+apps/web/ @tickethub/frontend
+
+# Shared
+packages/shared/ @tickethub/core
