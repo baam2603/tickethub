@@ -9,8 +9,6 @@ on:
 
 permissions:
   pull-requests: write
-  issues: write
-  actions: write
   contents: read
 
 jobs:
@@ -21,12 +19,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.ref }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
 
@@ -40,8 +38,9 @@ jobs:
             const pr = context.payload.pull_request;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const COMMENT_MARKER = '<!-- tickethub-pr-gate-marker -->';
 
-            // Lay danh sach commits cua PR
+            // Retrieve PR commit list
             const commitList = await github.paginate(github.rest.pulls.listCommits, {
               owner,
               repo,
@@ -53,7 +52,7 @@ jobs:
               sha: c.sha,
             }));
 
-            // Lay danh sach files thay doi cua PR
+            // Retrieve PR changed files
             const changedFilesData = await github.paginate(github.rest.pulls.listFiles, {
               owner,
               repo,
@@ -61,7 +60,7 @@ jobs:
             });
             const changedFiles = changedFilesData.map((f) => f.filename);
 
-            // Kiem tra doi soat tai lieu (Semantic Doc Parity)
+            // Audit documentation parity
             let docParity = null;
             try {
               docParity = auditDocParity({
@@ -82,34 +81,36 @@ jobs:
               changedFiles,
             });
 
+            // Helper to post or update sticky comment
+            async function upsertStickyComment(bodyContent) {
+              const fullBody = `${COMMENT_MARKER}\n${bodyContent}`;
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: pr.number,
+              });
+              const existing = comments.find((c) => c.body && c.body.includes(COMMENT_MARKER));
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: existing.id,
+                  body: fullBody,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  body: fullBody,
+                });
+              }
+            }
+
             if (!result.valid) {
               console.log('PR Strict Gate failed. Errors:', result.errors);
 
-              // 1. Huy tien trinh ci.yml dang chay hoac cho chay tren commit nay de tiet kiem tai nguyen
-              try {
-                const runs = await github.rest.actions.listWorkflowRuns({
-                  owner,
-                  repo,
-                  workflow_id: 'ci.yml',
-                });
-                for (const run of runs.data.workflow_runs) {
-                  if (
-                    run.head_sha === pr.head.sha &&
-                    (run.status === 'in_progress' || run.status === 'queued')
-                  ) {
-                    console.log(`Cancelling CI run ${run.id} (${run.status}) for commit ${pr.head.sha}`);
-                    await github.rest.actions.cancelWorkflowRun({
-                      owner,
-                      repo,
-                      run_id: run.id,
-                    });
-                  }
-                }
-              } catch (cancelError) {
-                console.log('Notice: Could not cancel CI run:', cancelError.message);
-              }
-
-              // 2. Gan label bao loi
+              // Update labels
               if (result.labelsToAdd.length > 0) {
                 await github.rest.issues.addLabels({
                   owner,
@@ -119,47 +120,27 @@ jobs:
                 });
               }
 
-              // 3. Dang comment huong dan sua loi
               const commentLines = [
-                '### Thông báo kiểm soát Pull Request (PR Strict Gate)',
+                '### Thong bao kiem soat Pull Request (PR Strict Gate)',
                 '',
-                'Pull Request này chưa vượt qua cổng kiểm soát sơ loại vì các lý do sau:',
+                'Pull Request chua vuot qua cong kiem soat vi cac ly do sau:',
                 '',
                 ...result.errors.map((err) => `- ${err}`),
                 '',
                 '---',
-                '**Hướng dẫn khắc phục:**',
-                '1. Chỉnh sửa mô tả PR và tích đủ toàn bộ các mục bắt buộc trong checklist.',
-                '2. Nếu commit sai quy chuẩn hoặc chứa emoji/em-dash, vui lòng reword và `git push --force`.',
-                '3. Nếu có thay đổi giao diện tại apps/web, bắt buộc đính kèm hình ảnh hoặc video minh chứng tại Mục 6.',
-                '4. Không được phép chỉnh sửa hạ tầng kiểm duyệt gate hoặc workflow kiểm soát.',
-                '5. Khi đã hoàn tất, PR sẽ tự động được kiểm tra lại và mở lại nếu đạt chuẩn.',
-                '',
-                '> Pull Request đã được tạm thời đóng tự động để bảo vệ tài nguyên CI.',
+                '**Huong dan khac phuc:**',
+                '1. Chinh sua mo ta PR va tich du toan bo cac muc bat buoc trong checklist.',
+                '2. Neu commit sai quy chuan hoac chua emoji hay em-dash, vui long sua commit va force push.',
+                '3. Neu co thay doi giao dien tai apps/web, bat buoc dinh kem hinh anh hoac video minh chung tai Muc 6.',
+                '4. Khong duoc phep chinh sua ha tang kiem duyet gate hoac workflow kiem soat.',
               ];
 
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: pr.number,
-                body: commentLines.join('\n'),
-              });
-
-              // 4. Dong PR
-              if (pr.state !== 'closed') {
-                await github.rest.pulls.update({
-                  owner,
-                  repo,
-                  pull_number: pr.number,
-                  state: 'closed',
-                });
-              }
-
-              core.setFailed('PR Gate Check không đạt yêu cầu: ' + result.errors.join('; '));
+              await upsertStickyComment(commentLines.join('\n'));
+              core.setFailed('PR Gate Check khong dat yeu cau: ' + result.errors.join('; '));
             } else {
               console.log('PR Strict Gate passed successfully.');
 
-              // Go bo cac label vi pham cu neu co
+              // Remove stale violation labels
               for (const label of result.labelsToRemove) {
                 try {
                   await github.rest.issues.removeLabel({
@@ -169,53 +150,29 @@ jobs:
                     name: label,
                   });
                 } catch {
-                  // Bo qua neu label chua ton tai
+                  // Ignore if label does not exist
                 }
               }
 
-              // Canh bao mem ve tai lieu neu co
+              // Update soft warning labels if needed
+              if (result.warnings && result.warnings.length > 0 && result.labelsToAdd.includes('needs-doc-update')) {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  labels: ['needs-doc-update'],
+                });
+              }
+
+              const successLines = [
+                '### Thong bao kiem soat Pull Request (PR Strict Gate)',
+                '',
+                'Pull Request da vuot qua tat ca cac tieu chi kiem soat gate thanh cong.',
+              ];
+
               if (result.warnings && result.warnings.length > 0) {
-                if (result.labelsToAdd.includes('needs-doc-update')) {
-                  await github.rest.issues.addLabels({
-                    owner,
-                    repo,
-                    issue_number: pr.number,
-                    labels: ['needs-doc-update'],
-                  });
-                }
-
-                const warningComment = [
-                  '### Cảnh báo lệch hợp đồng tài liệu (Doc Parity Soft Warning)',
-                  '',
-                  'Hệ thống phát hiện một số thay đổi mã nguồn chưa được phản ánh trong tài liệu kiến trúc:',
-                  '',
-                  ...result.warnings.map((w) => `- ${w}`),
-                  '',
-                  '> Lưu ý: Đây là cảnh báo mềm để hỗ trợ tác giả và reviewer duy trì tài liệu đồng bộ.',
-                ];
-
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: pr.number,
-                  body: warningComment.join('\n'),
-                });
+                successLines.push('', '**Canh bao dong bo tai lieu (Soft Warning):**', ...result.warnings.map((w) => `- ${w}`));
               }
 
-              // Neu PR dang bi dong truoc do va vua duoc sua hop le, tu dong mo lai
-              if (pr.state === 'closed') {
-                await github.rest.pulls.update({
-                  owner,
-                  repo,
-                  pull_number: pr.number,
-                  state: 'open',
-                });
-
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: pr.number,
-                  body: '### Thông báo PR Strict Gate: Pull Request đã được kiểm tra lại và hợp lệ. Hệ thống đã tự động mở lại PR để tiếp tục quy trình CI.',
-                });
-              }
+              await upsertStickyComment(successLines.join('\n'));
             }
