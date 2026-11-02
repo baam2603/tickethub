@@ -65,10 +65,10 @@ export default defineConfig({
       timeout: 30 * 1000,
     },
     {
-      command: "pnpm dev",
+      command: "pnpm start",
       url: "http://localhost:3000",
       reuseExistingServer: true,
-      timeout: 120 * 1000,
+      timeout: 60 * 1000,
     },
   ],
 });
