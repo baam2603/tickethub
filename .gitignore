@@ -2,6 +2,8 @@
 tmp/
 notes/
 .agents/
+.superpowers/
+docs/superpowers/
 skills-lock.json
 design-reference/
 *.ods

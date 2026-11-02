@@ -1,4 +1,5 @@
 .superpowers
+docs/superpowers
 test-results
 playwright-report
 **/test-results
