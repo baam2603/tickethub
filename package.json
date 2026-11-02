@@ -9,7 +9,7 @@
     "dev:all": "pnpm --parallel dev",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "lint": "eslint --max-warnings 0 \"apps/api/**/*.ts\" \"packages/shared/**/*.ts\"",
+    "lint": "pnpm -r --no-bail lint",
     "typecheck": "pnpm --filter @tickethub/shared build && pnpm --filter @tickethub/api exec tsc --noEmit && pnpm --filter @tickethub/web exec tsc --noEmit",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",

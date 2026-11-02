@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "lint": "eslint --max-warnings 0 .",
     "build": "tsc -p tsconfig.json",
     "test": "tsx --test --test-concurrency=1 test/**/*.test.ts",
     "dev": "tsc-watch -p tsconfig.json --onSuccess \"node dist/main.js\"",
