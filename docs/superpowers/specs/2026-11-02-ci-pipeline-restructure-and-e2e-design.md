@@ -2,9 +2,10 @@
 
 ## 1. Intent and Context
 
-The TicketHub repository is a monorepo containing a NestJS/Fastify backend (`apps/api`), a Next.js frontend (`apps/web`), and a shared TypeScript library (`packages/shared`). 
+The TicketHub repository is a monorepo containing a NestJS/Fastify backend (`apps/api`), a Next.js frontend (`apps/web`), and a shared TypeScript library (`packages/shared`).
 
 Prior to this initiative, CI/CD execution suffered from:
+
 - Fragile E2E testing in GitHub Actions using ad-hoc shell background processes (`nohup`, `sleep 5`), leading to intermittent timeouts, port collisions, and lack of artifact collection upon failure.
 - Sequential monolithic execution in `ci.yml` that prolonged build times and lacked caching for pnpm stores, Playwright browser binaries, and Next.js compiler caches.
 - Integration test suite race conditions on shared databases when concurrency was unconstrained.
@@ -16,6 +17,7 @@ Stages 0 and 1 have successfully addressed web lint debt, test serialization (`-
 ## 2. Goals, Non-Goals, and Anti-Goals
 
 ### Goals
+
 - Land the verified Stage 0 and Stage 1 branches cleanly onto local `unstable` with a linear history and zero merge conflicts.
 - Implement Stage 2 (`ci/e2e-playwright`):
   - Replace shell backgrounding with Playwright native `webServer` orchestration supporting dual-mode operation (existing local servers vs freshly spawned CI servers).
@@ -31,11 +33,13 @@ Stages 0 and 1 have successfully addressed web lint debt, test serialization (`-
 - Verify complete end-to-end landing and generate maintainer documentation.
 
 ### Non-Goals
+
 - Pushing any branch, commit, or tag to the remote GitHub origin (local execution only).
 - Refactoring application business logic or adding new application runtime features in `apps/api` or `apps/web`.
 - Modifying test specifications in `apps/web/test` unless strictly necessary for deterministic execution under production builds.
 
 ### Anti-Goals
+
 - Introducing any shell backgrounding (`&`, `nohup`, `wait-on`, `sleep`) to start servers in CI.
 - Blending protected infrastructure edits (`.github/**`) into PR branches that must pass `scripts/pr-gate-check.mjs`.
 - Allowing security audit warnings on PRs to block normal development; PR audits must inform via step summary, while scheduled workflows enforce failure.
@@ -51,11 +55,13 @@ Stages 0 and 1 have successfully addressed web lint debt, test serialization (`-
 ## 4. Approaches Considered
 
 ### Approach 1: Sequential Stage Execution (Selected)
+
 - **Description:** Execute each phase sequentially: land Stage 0/1 locally onto `unstable`, implement and verify Stage 2 (`ci/e2e-playwright`), implement and verify Stage 3 (`ci/hardening`), and finalize.
 - **Tradeoffs:** Requires sequential branch management and individual verification gates, but ensures absolute defect isolation between runtime test orchestration (Playwright, Fastify, Next.js) and operational governance (Docker, Dependabot, PR gate permissions).
 - **Decision:** Selected because it minimizes blast radius and prevents compounding errors across disparate CI domains.
 
 ### Approach 2: Monolithic Consolidation (Rejected)
+
 - **Description:** Combine Stages 2 and 3 into a single massive overhaul modifying `ci.yml`, `playwright.config.ts`, `Dockerfile`, `pr-gate.yml`, and `audit.yml` concurrently.
 - **Tradeoffs:** Avoids intermediate branch staging, but combines browser execution debugging with Docker multi-stage build debugging. A failure in CI would require diagnosing across multiple systems simultaneously, and creates an enormous DIRECT commit that is difficult to audit or rollback.
 - **Decision:** Rejected due to high risk and poor maintainability.
@@ -63,6 +69,7 @@ Stages 0 and 1 have successfully addressed web lint debt, test serialization (`-
 ## 5. Architectural and Implementation Specification
 
 ### Phase 1: Local Landing of Stage 0 and Stage 1
+
 1. On local `unstable`, sequentially merge:
    - PR 1: `fix/api-serialize-tests` (commit `948d731`) via squash commit.
    - PR 2: `fix/web-lint-warnings` (commit `f140001`) via rebase and squash commit.
@@ -73,6 +80,7 @@ Stages 0 and 1 have successfully addressed web lint debt, test serialization (`-
 ### Phase 2: Stage 2 Pipeline Restructure and Native E2E
 
 #### 1. Playwright Dual-Mode WebServer Configuration (`apps/web/playwright.config.ts`)
+
 - The webServer array in `apps/web/playwright.config.ts` must define both services:
   - API Service:
     - Command: `node ../api/dist/main.js` (requires `apps/api` build prior to test execution)
@@ -87,6 +95,7 @@ Stages 0 and 1 have successfully addressed web lint debt, test serialization (`-
 - This dual-mode setup guarantees zero downtime or crashes during transition between CI configurations.
 
 #### 2. Composite Environment Action (`.github/actions/setup-environment/action.yml`)
+
 - Create an action that standardizes environment setup across all jobs:
   - Inputs: `node-version` (default 22), `enable-cache` (default true).
   - Uses `pnpm/action-setup@v4`.
@@ -94,6 +103,7 @@ Stages 0 and 1 have successfully addressed web lint debt, test serialization (`-
   - Runs `pnpm install --frozen-lockfile`.
 
 #### 3. Granular CI Workflow Restructuring (`.github/workflows/ci.yml`)
+
 - Split the monolithic workflow into modular jobs:
   - `changes`: Detects modified paths using `dorny/paths-filter` to skip redundant downstream jobs on docs-only changes.
   - `static`: Runs `pnpm lint`, `pnpm format:check`, and `pnpm --filter @tickethub/shared build` followed by workspace typechecks in parallel. Also houses the non-blocking PR dependency audit via `node scripts/ci-audit-summary.mjs` writing to `$GITHUB_STEP_SUMMARY`.
@@ -105,21 +115,25 @@ Stages 0 and 1 have successfully addressed web lint debt, test serialization (`-
   - `publish`: Runs only on `unstable` branch on push to build and push container images to GHCR.
 
 #### 4. Caching Configuration
+
 - Caching `~/.cache/ms-playwright` keyed by Playwright version and OS runner. On cache hit, still execute `pnpm --filter @tickethub/web exec playwright install-deps chromium` to guarantee system shared libraries are present.
 - Caching `apps/web/.next/cache` keyed by runner OS, lockfile, and web source hash.
 
 #### 5. Commit Isolation
+
 - Branch `ci/e2e-playwright`: Contains `apps/web/playwright.config.ts` and `apps/web/package.json`. No changes to `.github/**`.
 - Branch `direct/ci-e2e-playwright`: Contains `.github/workflows/ci.yml` and `.github/actions/**`. Cherry-picked directly onto `unstable`.
 
 ### Phase 3: Stage 3 CI Hardening and Operational Governance
 
 #### 1. Scheduled Security Workflow (`.github/workflows/audit.yml`)
+
 - Runs on a cron schedule (weekly) and on manual `workflow_dispatch`.
 - Executes `pnpm audit --prod --audit-level=high`.
 - Exits with a failure code if high or critical vulnerabilities are detected, triggering maintenance alerts.
 
 #### 2. Multi-Stage Production Container (`Dockerfile`)
+
 - Target: `@tickethub/api` (frontend containerization is managed by `docker/Dockerfile.web`).
 - Rewrite `Dockerfile` using multi-stage builds:
   - Stage 1 (`base`): Alpine base with Node.js 22 and pnpm.
@@ -129,20 +143,24 @@ Stages 0 and 1 have successfully addressed web lint debt, test serialization (`-
     `HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD node -e 'fetch("http://localhost:4000/health").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'`
 
 #### 3. PR Gate Refactoring (`.github/workflows/pr-gate.yml`)
+
 - Remove automatic PR closure.
 - Remove cancellation of other workflow runs (`actions: write` eliminated; least privilege `pull-requests: write`, `contents: read`).
 - Replace iterative comment posting with a single sticky comment identified by an HTML comment marker (`<!-- tickethub-pr-gate-marker -->`), updating existing comments on new pushes.
 
 #### 4. Repository Governance
+
 - Add `.github/dependabot.yml` configured for monthly npm dependency updates and GitHub Actions updates.
 - Add `.github/CODEOWNERS` defining ownership for infrastructure, backend, and frontend.
 - Add root `pnpm verify` script running all linters, typechecks, tests, and formatting checks locally before PR submission.
 
 #### 5. Commit Isolation for Stage 3
+
 - Branch `ci/hardening`: Contains non-protected files (`Dockerfile`, `.dockerignore`, `package.json`, `.github/dependabot.yml`, `.github/CODEOWNERS`). These files do not match `PROTECTED_INFRASTRUCTURE_PATTERNS`.
 - Branch `direct/ci-hardening`: Contains protected workflow files (`.github/workflows/audit.yml`, `.github/workflows/pr-gate.yml`). Cherry-picked directly onto `unstable`.
 
 ### Phase 4: Final Verification and Handoff
+
 - Re-simulate landing of all stages on a fresh clone.
 - Run full pre-push suites and verify zero warnings.
 - Output maintainer instructions for landing onto origin `unstable`.

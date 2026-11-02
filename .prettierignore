@@ -1,0 +1,8 @@
+.superpowers
+test-results
+playwright-report
+**/test-results
+**/playwright-report
+**/dist
+**/.next
+**/node_modules
