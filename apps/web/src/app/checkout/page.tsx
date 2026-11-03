@@ -59,25 +59,25 @@ interface OrderDetailResponse {
 
 const DEFAULT_ORDER: OrderDetailResponse = {
   orderId: "ord-sample-01",
-  orderCode: "ORD-20261103-BRUNO",
+  orderCode: "ORD-20261103-MUATHU",
   status: "PENDING",
-  totalAmount: 3600000,
+  totalAmount: 5000000,
   expiresAt: new Date(Date.now() + 300 * 1000).toISOString(),
   items: [
     {
-      ticketTypeId: "tt-vip-01",
-      ticketTypeName: "VIP 1 (Khán đài A)",
-      zoneName: "Khu vực VIP 1",
+      ticketTypeId: "34e9dcbc-3184-4f12-9777-da70b8b6001f",
+      ticketTypeName: "Khu VIP A",
+      zoneName: "Khu VIP A",
       quantity: 2,
-      unitPrice: 1800000,
-      seats: ["Hàng G - Ghế 14", "Hàng G - Ghế 15"],
+      unitPrice: 2500000,
+      seats: ["Hàng A - Ghế 01", "Hàng A - Ghế 02"],
       isStanding: false,
     },
   ],
-  eventId: "evt-bruno-mars",
-  eventTitle: "Bruno Mars Live in Concert 2026 - Hanoi",
-  eventVenue: "Sân vận động Quốc gia Mỹ Đình, Hà Nội",
-  eventDateTime: "19:30 - Thứ Bảy, 15/11/2026",
+  eventId: "e742fd19-f438-4ae8-9f75-f8d9ca26433b",
+  eventTitle: "Liveshow Âm Nhạc Mùa Thu 2026",
+  eventVenue: "Trung tâm Hội nghị Quốc gia, Hà Nội",
+  eventDateTime: "20:00 - Thứ Hai, 16/11/2026",
 };
 
 function CheckoutContent() {
@@ -99,13 +99,13 @@ function CheckoutContent() {
   const carouselImages = [
     {
       src: "/assets/seat-view.jpg",
-      alt: "Góc nhìn từ chỗ ngồi - Sân vận động Quốc gia Mỹ Đình",
+      alt: "Góc nhìn từ chỗ ngồi - Trung tâm Hội nghị Quốc gia",
       label: "Góc nhìn từ chỗ ngồi (View from Seat)",
     },
     {
       src: "/assets/artist-banner.webp",
-      alt: "Nghệ sĩ biểu diễn Bruno Mars",
-      label: "Nghệ sĩ biểu diễn (Bruno Mars)",
+      alt: "Sân khấu đại nhạc hội",
+      label: "Sân khấu đại nhạc hội",
     },
   ];
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -591,7 +591,7 @@ function CheckoutContent() {
               <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
                 {ticketItem.ticketTypeName ||
                   ticketItem.zoneName ||
-                  "VIP 1 (Khán đài A)"}
+                  "Khu VIP A"}
               </h1>
 
               <div className="text-sm sm:text-base text-muted-foreground flex items-center gap-2 flex-wrap pt-0.5">
@@ -599,13 +599,13 @@ function CheckoutContent() {
                 <span>•</span>
                 {ticketItem.isStanding ? (
                   <span className="font-semibold text-foreground">
-                    Khu vực: GA - Fanzone (Vé đứng)
+                    Khu vực: GA (Vé đứng)
                   </span>
                 ) : (
                   <span className="font-semibold text-foreground">
                     {ticketItem.seats && ticketItem.seats.length > 0
                       ? ticketItem.seats.join(", ")
-                      : "Hàng G - Ghế 14, Hàng G - Ghế 15"}
+                      : "Hàng A - Ghế 01, Hàng A - Ghế 02"}
                   </span>
                 )}
               </div>
@@ -746,12 +746,12 @@ function CheckoutContent() {
                   <div>
                     <span className="font-medium text-foreground">
                       {ticketItem.quantity} x{" "}
-                      {ticketItem.ticketTypeName || "Vé VIP 1"}
+                      {ticketItem.ticketTypeName || "Vé VIP A"}
                     </span>
                     <div className="text-[11px] text-muted-foreground">
                       {ticketItem.unitPrice
                         ? `${ticketItem.unitPrice.toLocaleString("vi-VN")} ₫ mỗi vé`
-                        : "1.800.000 ₫ mỗi vé"}
+                        : "2.500.000 ₫ mỗi vé"}
                     </div>
                   </div>
                   <span className="font-semibold text-foreground">

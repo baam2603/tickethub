@@ -24,28 +24,6 @@ export interface EventItem {
 
 export const EVENTS: EventItem[] = [
   {
-    id: "f43b6b95-dca8-44c1-a675-0d3a5f9bb0a6",
-    title: "Bruno Mars Live in Concert 2026 - Hanoi",
-    category: "CONCERT",
-    dateRange: "15 Th11 - 16 Th11",
-    fullDateTime: "CN, 15 Th11, 2026 • 19:30",
-    doorsOpenTime: "17:00",
-    dateWindow: "WEEKEND",
-    venue: "Sân vận động Quốc gia Mỹ Đình",
-    venueAddress: "Đường Lê Đức Thọ, Mỹ Đình 1, Nam Từ Liêm, Hà Nội",
-    city: "Hà Nội",
-    cityCode: "HN",
-    fromPrice: "800.000 ₫+",
-    minPriceNumber: 800000,
-    organizerName: "Live Nation & TicketHub Vietnam",
-    description:
-      "Siêu đại nhạc hội Bruno Mars Live in Concert 2026 tại Sân vận động Quốc gia Mỹ Đình, Hà Nội.",
-    image: "/assets/seat-view.jpg",
-    portraitImage: "/assets/artist-banner.webp",
-    featuredOrder: 1,
-    trendingOrder: 1,
-  },
-  {
     id: "e742fd19-f438-4ae8-9f75-f8d9ca26433b",
     title: "Liveshow Âm Nhạc Mùa Thu 2026",
     category: "CONCERT",
@@ -64,8 +42,8 @@ export const EVENTS: EventItem[] = [
       "Đại nhạc hội quy tụ các nghệ sĩ hàng đầu Việt Nam tại Trung tâm Hội nghị Quốc gia.",
     image: "/images/events/vn/anh-trai.jpg",
     portraitImage: "/images/events/vn/anh-trai.jpg",
-    featuredOrder: 2,
-    trendingOrder: 2,
+    featuredOrder: 1,
+    trendingOrder: 1,
   },
   // 4 Popular Portrait Marquee Events (286x352 aspect ratio)
   {
@@ -479,12 +457,6 @@ export function formatVnd(amount: number): string {
 }
 
 export function getEventById(id: string): EventItem | undefined {
-  if (id === "evt-bruno-mars" || id === "bruno-mars") {
-    return (
-      EVENTS.find((ev) => ev.id === "f43b6b95-dca8-44c1-a675-0d3a5f9bb0a6") ||
-      EVENTS[0]
-    );
-  }
   return EVENTS.find((ev) => ev.id === id);
 }
 
@@ -530,56 +502,6 @@ export function getEventVenueMapKey(event: EventItem): VenueMapKey {
 }
 
 export function getEventListings(event: EventItem): TicketListing[] {
-  // Real database event: Bruno Mars Live in Concert 2026 - Hanoi
-  if (
-    event.id === "f43b6b95-dca8-44c1-a675-0d3a5f9bb0a6" ||
-    event.id === "evt-bruno-mars"
-  ) {
-    const realEventId = "f43b6b95-dca8-44c1-a675-0d3a5f9bb0a6";
-    return [
-      {
-        id: "f54fb91c-4317-4a7b-a82c-2da47598197b",
-        eventId: realEventId,
-        zoneId: "5715",
-        zoneName: "VIP 1 (Khán đài A)",
-        section: "VIP 1 (Khán đài A)",
-        row: "Hàng G & H",
-        seatInfo: "Phân bổ tự động ghế liền kề",
-        price: 1800000,
-        originalPrice: 2000000,
-        availableTickets: 40,
-        dealScore: 10,
-        dealLabel: "Tuyệt vời",
-        features: [
-          "Phân bổ tự động ghế ngồi liền kề",
-          "Tầm nhìn trực diện sân khấu chính",
-          "Vé điện tử QR động cập nhật mỗi 30s",
-        ],
-        viewFromSeatUrl: "/assets/seat-view.jpg",
-      },
-      {
-        id: "f0a1f3e6-77aa-4ae2-a76b-59a837154c25",
-        eventId: realEventId,
-        zoneId: "27859",
-        zoneName: "Fanzone (Vé đứng)",
-        section: "Fanzone (Vé đứng)",
-        seatInfo: "Khu vực đứng tự do - Fanzone",
-        price: 800000,
-        originalPrice: 900000,
-        availableTickets: 200,
-        dealScore: 9,
-        dealLabel: "Rất tốt",
-        features: [
-          "Gần sát sân khấu biểu diễn",
-          "Khu vực đứng tự do sôi động",
-          "Vé điện tử QR động cập nhật mỗi 30s",
-        ],
-        viewFromSeatUrl: "/assets/seat-view.jpg",
-        isStanding: true,
-      },
-    ];
-  }
-
   // Real database event: Liveshow Âm Nhạc Mùa Thu 2026
   if (event.id === "e742fd19-f438-4ae8-9f75-f8d9ca26433b") {
     return [
