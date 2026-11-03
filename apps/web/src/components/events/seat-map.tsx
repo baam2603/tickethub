@@ -309,17 +309,19 @@ function SeatMapView({
         style={{ touchAction: "none" }}
         className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing overflow-hidden"
       >
-        {/* Floating Hover Tooltip: Only show price on white background, nothing on sold out */}
+        {/* Floating Hover Tooltip: Positioned directly above cursor and aligned center */}
         {tooltip && (
           <div
             style={{
-              left: `${tooltip.x + 12}px`,
-              top: `${tooltip.y - 36}px`,
+              left: `${tooltip.x}px`,
+              top: `${tooltip.y - 12}px`,
               pointerEvents: "none",
             }}
-            className="absolute z-30 transform -translate-y-full bg-white text-emerald-600 font-bold text-[13px] px-3 py-1 rounded-[6px] shadow-md border border-border whitespace-nowrap pointer-events-none select-none"
+            className="absolute z-30 transform -translate-x-1/2 -translate-y-full bg-white text-emerald-600 font-bold text-[13px] px-3 py-1 rounded-[6px] shadow-md border border-border whitespace-nowrap pointer-events-none select-none"
           >
             {formatVnd(tooltip.price)}
+            <div className="absolute left-1/2 top-full -translate-x-1/2 -mt-[1px] w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-border" />
+            <div className="absolute left-1/2 top-full -translate-x-1/2 -mt-[2px] w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-white" />
           </div>
         )}
 
