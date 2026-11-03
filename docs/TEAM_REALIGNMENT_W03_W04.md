@@ -8,9 +8,9 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 
 ### 1.1 Khách hàng chỉ chọn Khu vực và Số lượng vé
 
-- **Mô hình trải nghiệm người dùng**: Khách hàng mua vé **chỉ thao tác chọn Khu vực / Hạng vé** (`ticketTypeId`) và **Số lượng vé** (`quantity: 1..6`) trên sơ đồ phân khu tổng thể (Zone Map).
-- **Tuyệt đối không có tính năng chọn từng ghế lẻ**: Hệ thống không cung cấp giao diện bấm chọn từng số ghế trên sơ đồ chi tiết (Seat-by-seat clicker).
-- **Hợp đồng dữ liệu (API Contract)**: Payload gửi lên endpoint `POST /api/v1/booking/hold` tuân thủ nghiêm ngặt định dạng:
+- **Mô hình trải nghiệm người dùng**: Khách hàng mua vé **thao tác chọn Khu vực / Hạng vé** (`ticketTypeId`) và **Số lượng vé** (`quantity: 1..6`) trên sơ đồ phân khu tổng thể (Zone Map).
+- **Phạm vi giao diện**: Hệ thống không cung cấp giao diện bấm chọn từng số ghế trên sơ đồ chi tiết (Seat-by-seat clicker).
+- **Hợp đồng dữ liệu (API Contract)**: Payload gửi lên endpoint `POST /api/v1/booking/hold` sử dụng định dạng:
   ```json
   {
     "eventId": "<uuid-event>",
@@ -22,7 +22,7 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
     ]
   }
   ```
-  Client **không được gửi kèm trường `seatId`**.
+  Client không gửi kèm trường `seatId`.
 
 ### 1.2 Phân bổ ghế tự động và khóa dòng dữ liệu tại Backend
 
@@ -40,7 +40,7 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 
 - Hàng chờ ảo chạy trên Redis Sorted Sets, đóng vai trò là van điều tiết lưu lượng cổng vào, chỉ kích hoạt khi sự kiện có cấu hình `isWaitingRoomEnabled = true`.
 - Với các sự kiện thông thường (`isWaitingRoomEnabled = false`), người dùng không qua hàng chờ mà đi thẳng vào giữ chỗ.
-- Mã lượt vào (`x-admission-token`) phải do server cấp phát có chữ ký xác thực. Client **tuyệt đối không được tự sinh token giả lập** ở local storage. Khi backend trả về lỗi thiếu token (`MISSING_ADMISSION_TOKEN`), client tự động điều hướng người dùng sang trang `/waiting-room`.
+- Mã lượt vào (`x-admission-token`) do server cấp phát có chữ ký xác thực. Client không tự sinh token giả lập ở local storage. Khi backend trả về mã lỗi thiếu token (`MISSING_ADMISSION_TOKEN`), client tự động điều hướng người dùng sang trang `/waiting-room`.
 
 ---
 
@@ -52,7 +52,7 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
   - Tái cấu trúc bài test concurrency `apps/web/test/booking-concurrency.spec.ts`: loại bỏ trường `seatId` trong request body; chuyển sang kiểm thử tranh chấp số lượng vé trong khu vực (Zone capacity contention).
   - Kịch bản chuẩn: 100 requests đồng thời tranh chấp một khu vực chỉ còn 1 ghế trống (kỳ vọng đúng 1 request thành công 201 Created và 99 requests nhận 409 Conflict với mã `INSUFFICIENT_TICKET_CAPACITY`).
   - Kiểm tra tính duy nhất: 50 requests thành công giữ chỗ không được trùng bất kỳ ghế nào trong `allocatedSeats`.
-  - Khử bỏ hoàn toàn việc gọi lệnh `docker exec tickethub-postgres psql` trong mã test; lấy thông tin qua API công khai hoặc test fixtures định sẵn.
+  - Loại bỏ việc gọi lệnh `docker exec tickethub-postgres psql` trong mã test; lấy thông tin qua API công khai hoặc test fixtures định sẵn.
   - Gỡ bỏ `testIgnore` trong `playwright.config.ts` và thêm script chạy `pnpm test:concurrency` vào `apps/web/package.json`.
 - **Gói W04-PM (Tiến độ: 10% - Mở song song)**:
   - Lập bộ test case cho cổng thanh toán VNPay sandbox: trường hợp thanh toán thành công, người dùng hủy, timeout, và xử lý IPN ngoại lệ (gửi trùng, sai chữ ký, đơn đã quá hạn).
@@ -60,7 +60,7 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 ### 2.2 Vĩ Kiệt (Frontend Lead)
 
 - **Gói W03-FE1 (Tiến độ: 80% - Đang sửa PR #42)**:
-  - Loại bỏ hoàn toàn mã tự sinh token giả lập (`adm_w03_...`) và bộ đếm client trong `apps/web/src/app/(public)/waiting-room/page.tsx`. Màn hình hàng chờ phải tiêu thụ API thực tế `POST /api/v1/waiting-room/:eventId/join` và `heartbeat`.
+  - Loại bỏ mã tự sinh token giả lập (`adm_w03_...`) và bộ đếm client trong `apps/web/src/app/(public)/waiting-room/page.tsx`. Màn hình hàng chờ tiêu thụ API thực tế `POST /api/v1/waiting-room/:eventId/join` và `heartbeat`.
   - Sửa mã lỗi bắt sự kiện chuyển hướng trong `apps/web/src/components/events/event-detail-client.tsx` thành `MISSING_ADMISSION_TOKEN` (thay cho mã cũ `WAITING_ROOM_REQUIRED`).
   - Loại bỏ logic tự sinh mã đơn hàng giả `ORD-XXXXX` ở client khi API chưa phản hồi; không cho phép thanh toán với đơn hàng ảo.
   - Chuyển đổi 10 thẻ `<img>` thô sang component `<Image />` từ `next/image`.
@@ -70,8 +70,8 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 
 ### 2.3 Phú An (Frontend PWA & UI/UX)
 
-- **Gói W03-FE2 (Tiến độ: 60% - Hoàn thành bàn giao)**:
-  - Đóng PR #12; gỡ bỏ hoàn toàn logic vẽ sơ đồ chi tiết từng ghế và xử lý sự kiện click/minimap phức tạp.
+- **Gói W03-FE2 (Tiến độ: 60% - Đã bàn giao)**:
+  - Đóng PR #12; bỏ logic vẽ sơ đồ chi tiết từng ghế và xử lý sự kiện click/minimap phức tạp.
   - Bàn giao layout hiển thị phân khu tổng thể (Zone Map) cho Vĩ Kiệt (FE1).
 - **Gói W04-FE2 (Tiến độ: 20% - Mở song song)**:
   - Tập trung phát triển màn hình "Vé của tôi" (`/my-tickets`): hiển thị danh sách vé đã mua, thông tin vị trí ghế được cấp, khung chờ mã QR động.
@@ -81,7 +81,7 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 
 ### 2.4 Tuấn Anh (Backend Lead)
 
-- **Gói W03-BE1 (Tiến độ: 100% - Hoàn thành xuất sắc tại PR #14)**:
+- **Gói W03-BE1 (Tiến độ: 100% - Đã nghiệm thu tại PR #14)**:
   - Đã kiểm chứng thuật toán Auto-Seat Allocation, transaction phân tầng PostgreSQL và tác vụ dọn dẹp đơn hết hạn.
 - **Gói W04-BE1 (Tiến độ: 20% - Mở song song)**:
   - Hoàn tất đơn hàng nguyên tử khi nhận tín hiệu thanh toán thành công (PENDING sang PAID, HELD sang SOLD, sinh mã vé).
@@ -90,7 +90,7 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 
 ### 2.5 Tuấn Khôi (Backend Integration)
 
-- **Gói W03-BE2 (Tiến độ: 100% - Hoàn thành xuất sắc tại PR #13)**:
+- **Gói W03-BE2 (Tiến độ: 100% - Đã nghiệm thu tại PR #13)**:
   - Đã hoàn tất API tìm kiếm full-text tiếng Việt unaccent và cơ chế cache tồn kho Redis.
 - **Gói W04-BE2 (Tiến độ: 15% - Mở song song)**:
   - Hoàn thiện module thanh toán VNPay: tạo URL thanh toán có `idempotencyKey`, xử lý webhook IPN an toàn chống replay attack, hàm kiểm tra trạng thái QueryDR.
