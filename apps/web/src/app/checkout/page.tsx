@@ -9,6 +9,7 @@ import React, {
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Clock,
   ShieldCheck,
@@ -18,11 +19,21 @@ import {
   Calendar,
   AlertTriangle,
   CheckCircle2,
-  Ticket,
+  ChevronLeft,
   ChevronRight,
+  Share2,
+  Info,
+  ChevronDown,
   Sparkles,
+  Flame,
+  Award,
+  Check,
+  Eye,
+  Users,
+  Zap,
+  TrendingUp,
+  X,
 } from "lucide-react";
-import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -51,12 +62,11 @@ interface OrderDetailResponse {
   eventDateTime?: string;
 }
 
-// Default realistic sample data if loaded in preview mode or without direct backend orderId
 const DEFAULT_ORDER: OrderDetailResponse = {
   orderId: "ord-sample-01",
   orderCode: "ORD-20261103-BRUNO",
   status: "PENDING",
-  totalAmount: 3850000,
+  totalAmount: 3600000,
   expiresAt: new Date(Date.now() + 300 * 1000).toISOString(),
   items: [
     {
@@ -83,30 +93,42 @@ function CheckoutContent() {
 
   const [order, setOrder] = useState<OrderDetailResponse>(DEFAULT_ORDER);
   const [isLoading, setIsLoading] = useState(Boolean(orderId));
-  const [secondsLeft, setSecondsLeft] = useState(299); // 5 minutes default
+  const [secondsLeft, setSecondsLeft] = useState(299);
   const [isExpired, setIsExpired] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
 
-  // Form states
+  // Carousel state
+  const carouselImages = [
+    {
+      src: "/assets/seat-view.jpg",
+      alt: "Góc nhìn từ chỗ ngồi - Sân vận động Quốc gia Mỹ Đình",
+      label: "Góc nhìn từ chỗ ngồi (View from Seat)",
+    },
+    {
+      src: "/assets/artist-banner.webp",
+      alt: "Nghệ sĩ biểu diễn Bruno Mars",
+      label: "Nghệ sĩ biểu diễn (Bruno Mars)",
+    },
+  ];
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  // Form states for checkout payment modal
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [notifySms, setNotifySms] = useState(true);
-
-  // Voucher
+  const [paymentMethod, setPaymentMethod] = useState<
+    "vnpay_qr" | "vnpay_atm" | "vnpay_intl"
+  >("vnpay_qr");
   const [voucherCode, setVoucherCode] = useState("");
   const [voucherDiscount, setVoucherDiscount] = useState(0);
   const [voucherAppliedCode, setVoucherAppliedCode] = useState<string | null>(
     null,
   );
   const [voucherError, setVoucherError] = useState<string | null>(null);
-
-  // Payment
-  const [paymentMethod, setPaymentMethod] = useState<
-    "vnpay_qr" | "vnpay_atm" | "vnpay_intl"
-  >("vnpay_qr");
   const [isSubmittingPayment, startPaymentTransition] = useTransition();
   const [paymentError, setPaymentError] = useState<string | null>(null);
 
@@ -148,7 +170,6 @@ function CheckoutContent() {
         }>(`/booking/orders/${orderId}`);
         if (isMounted && res.data) {
           setOrder(res.data);
-          // Calculate remaining seconds from expiresAt
           if (res.data.expiresAt) {
             const expireTime = new Date(res.data.expiresAt).getTime();
             const now = Date.now();
@@ -157,8 +178,7 @@ function CheckoutContent() {
             if (diff <= 0) setIsExpired(true);
           }
         }
-      } catch (err) {
-        // Fallback to sample data for visual resilience
+      } catch {
         if (isMounted) {
           const safeId = orderId || "ord-sample-01";
           setOrder({
@@ -193,7 +213,7 @@ function CheckoutContent() {
     }
   }, [order.orderId]);
 
-  // Live countdown timer
+  // Countdown timer logic
   useEffect(() => {
     if (isLoading || isExpired) return;
 
@@ -211,14 +231,12 @@ function CheckoutContent() {
     return () => clearInterval(interval);
   }, [isLoading, isExpired, handleExpireRelease]);
 
-  // Format timer MM:SS
   const formatTimer = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Cancel reservation
   const confirmCancelHold = async () => {
     setIsCancelling(true);
     try {
@@ -236,7 +254,6 @@ function CheckoutContent() {
     }
   };
 
-  // Apply Voucher
   const handleApplyVoucher = () => {
     setVoucherError(null);
     const code = voucherCode.trim().toUpperCase();
@@ -261,11 +278,8 @@ function CheckoutContent() {
     }
   };
 
-  // Submit VNPay payment
   const handlePaymentSubmit = () => {
     setPaymentError(null);
-
-    // Basic contact validation
     if (!firstName.trim() || !email.trim() || !phone.trim()) {
       setPaymentError(
         "Vui lòng điền đầy đủ họ tên, email và số điện thoại người nhận vé.",
@@ -295,536 +309,788 @@ function CheckoutContent() {
         if (res.data?.paymentUrl) {
           window.location.href = res.data.paymentUrl;
         } else {
-          // If in test/mock environment without real VNPay gateway:
           router.push(`/buyer/orders/${order.orderId}?paymentSuccess=true`);
         }
-      } catch (err: unknown) {
-        // Fallback for simulation if backend endpoint is unavailable
+      } catch {
         router.push(`/buyer/orders/${order.orderId}?paymentSuccess=true`);
       }
     });
   };
 
-  // Calculate pricing breakdown
   const subtotal = order.totalAmount || 3600000;
   const platformFee = 250000;
   const finalTotal = Math.max(0, subtotal + platformFee - voucherDiscount);
 
-  // Find event image or fallback
   const eventData = EVENTS.find((e) => e.id === order.eventId) || EVENTS[0];
+  const ticketItem = order.items[0] || DEFAULT_ORDER.items[0];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased selection:bg-emerald-500 selection:text-white pb-20">
-      {/* Top Sticky Header */}
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
-        <div className="max-w-7xl mx-auto h-16 md:h-[70px] px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-          <Logo />
-
-          <div className="flex items-center gap-3 md:gap-5">
-            <div
-              className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs md:text-sm font-semibold transition-colors ${
-                secondsLeft <= 60
-                  ? "bg-red-50 border-red-200 text-red-700 animate-pulse"
-                  : "bg-emerald-50/80 border-emerald-200 text-emerald-800"
-              }`}
-            >
-              <div
-                className={`h-2 w-2 rounded-full ${
-                  secondsLeft <= 60
-                    ? "bg-red-600 animate-ping"
-                    : "bg-emerald-600"
-                }`}
+    <div className="min-h-screen bg-background text-foreground font-sans antialiased flex flex-col justify-between">
+      {/* 1. TOP BAR */}
+      <header className="sticky top-0 z-40 w-full bg-background border-b border-border shadow-xs">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-4">
+          {/* Left: Seat View Thumbnail, Event Details, Status Chip */}
+          <div className="flex items-center gap-2.5 sm:gap-4 min-w-0 flex-1">
+            <div className="relative w-14 h-14 sm:w-20 sm:h-20 rounded-lg sm:rounded-xl overflow-hidden shrink-0 border border-border bg-muted">
+              <Image
+                src="/assets/seat-view.jpg"
+                alt="Góc nhìn từ chỗ ngồi"
+                fill
+                sizes="(max-width: 640px) 56px, 80px"
+                className="object-cover"
+                priority
               />
-              <span className="hidden sm:inline">Thời gian giữ vé:</span>
-              <span className="font-mono text-sm md:text-base font-bold tabular-nums">
-                {formatTimer(secondsLeft)}
-              </span>
             </div>
 
+            <div className="min-w-0 space-y-0.5 sm:space-y-1">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <Link
+                  href={order.eventId ? `/events/${order.eventId}` : "/events"}
+                  className="text-primary font-bold text-sm sm:text-base md:text-lg leading-tight truncate hover:underline"
+                >
+                  {order.eventTitle || eventData.title}
+                </Link>
+                <span className="inline-flex items-center px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold bg-destructive/10 text-destructive border border-destructive/20 shrink-0">
+                  Sắp hết vé
+                </span>
+              </div>
+
+              <div className="text-[11px] sm:text-xs text-muted-foreground flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <span className="shrink-0">
+                  {order.eventDateTime || eventData.fullDateTime}
+                </span>
+                <span className="hidden xs:inline">•</span>
+                <span className="text-foreground underline underline-offset-2 decoration-muted-foreground/60 truncate">
+                  {order.eventVenue || eventData.venue}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Share, Countdown Timer with Clock & Info, Currency Selector */}
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+            {/* Circular Share Button */}
             <button
-              onClick={() => setShowCancelModal(true)}
-              className="text-xs md:text-sm font-medium text-slate-500 hover:text-red-600 py-1.5 px-2.5 rounded-md hover:bg-slate-100 transition-colors"
+              type="button"
+              onClick={() => {
+                if (navigator.share) {
+                  navigator.share({
+                    title: order.eventTitle || eventData.title,
+                    url: window.location.href,
+                  });
+                } else {
+                  navigator.clipboard.writeText(window.location.href);
+                  alert("Đã sao chép liên kết đặt vé vào bộ nhớ tạm.");
+                }
+              }}
+              aria-label="Chia sẻ sự kiện"
+              className="h-8 w-8 sm:h-9 sm:w-9 rounded-full border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors shrink-0"
             >
-              Hủy giữ chỗ
+              <Share2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </button>
+
+            {/* Countdown Hold Capsule with Clock and Info Icons */}
+            <div
+              className={`inline-flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border text-xs sm:text-sm font-semibold transition-colors shrink-0 ${
+                secondsLeft <= 60
+                  ? "bg-destructive/10 border-destructive/30 text-destructive animate-pulse"
+                  : "bg-muted/70 border-border text-foreground"
+              }`}
+            >
+              <Clock
+                className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${secondsLeft <= 60 ? "text-destructive" : "text-muted-foreground"}`}
+              />
+              <span className="font-mono text-xs sm:text-sm font-bold tabular-nums">
+                {formatTimer(secondsLeft)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowInfoModal(true)}
+                aria-label="Thông tin thời hạn giữ vé"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Info className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+              </button>
+            </div>
+
+            {/* Currency / Language Selector */}
+            <div className="hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-border text-xs font-semibold text-foreground bg-background">
+              <span>VND | VN</span>
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            </div>
+
+            {/* Abort reservation link */}
+            <button
+              type="button"
+              onClick={() => setShowCancelModal(true)}
+              className="text-xs font-medium text-muted-foreground hover:text-destructive hidden lg:inline ml-1"
+            >
+              Hủy
             </button>
           </div>
         </div>
       </header>
 
-      {/* Main 2-Column Checkout Layout */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 md:pt-10">
+      {/* 2. TWO-COLUMN LAYOUT (Max-W 1200px, 60/40 Ratio) */}
+      <main className="max-w-[1200px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 flex-1 pb-24 lg:pb-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
-          {/* Left Column: Form & Payment Operations (Col Span 7-8) */}
-          <div className="lg:col-span-7 xl:col-span-8 space-y-6">
-            {/* Step 1: Attendee Contact Details */}
-            <section className="bg-white rounded-xl border border-slate-200 p-6 md:p-7 shadow-xs">
-              <div className="flex items-center justify-between pb-4 mb-5 border-b border-slate-100">
-                <div className="flex items-center gap-3">
-                  <span className="h-7 w-7 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
-                    1
-                  </span>
-                  <h2 className="text-lg md:text-xl font-bold text-slate-900 tracking-tight">
-                    Thông tin người nhận vé
-                  </h2>
-                </div>
-                <Badge
-                  variant="outline"
-                  className="bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold text-xs"
-                >
-                  {isAuthenticated ? "Tự động điền tài khoản" : "Khách mua vé"}
-                </Badge>
+          {/* LEFT COLUMN (~60% inside 12-col grid: col-span-7) */}
+          <div className="lg:col-span-7 space-y-6">
+            {/* Hero Image Carousel */}
+            <div className="relative rounded-2xl overflow-hidden aspect-[16/10] bg-muted border border-border shadow-xs group">
+              <Image
+                src={carouselImages[currentSlide].src}
+                alt={carouselImages[currentSlide].alt}
+                fill
+                sizes="(max-width: 1024px) 100vw, 700px"
+                className="object-cover"
+                priority
+              />
+
+              {/* Tag overlay */}
+              <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-xs text-white text-xs font-semibold px-2.5 py-1 rounded-md flex items-center gap-1.5 shadow-sm">
+                <Eye className="h-3.5 w-3.5 text-white" />
+                <span>{carouselImages[currentSlide].label}</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-xs md:text-sm font-semibold text-slate-700 mb-1.5">
-                    Họ và tên lót <span className="text-red-500">*</span>
-                  </label>
-                  <Input
-                    type="text"
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    placeholder="Ví dụ: Nguyễn Văn"
-                    className="h-11 bg-white border-slate-300 focus-visible:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs md:text-sm font-semibold text-slate-700 mb-1.5">
-                    Tên <span className="text-red-500">*</span>
-                  </label>
-                  <Input
-                    type="text"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    placeholder="Ví dụ: An"
-                    className="h-11 bg-white border-slate-300 focus-visible:ring-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-xs md:text-sm font-semibold text-slate-700 mb-1.5">
-                    Địa chỉ Email nhận vé{" "}
-                    <span className="text-red-500">*</span>
-                  </label>
-                  <Input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@example.com"
-                    className="h-11 bg-white border-slate-300 focus-visible:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs md:text-sm font-semibold text-slate-700 mb-1.5">
-                    Số điện thoại liên hệ{" "}
-                    <span className="text-red-500">*</span>
-                  </label>
-                  <Input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="09xxxxxxxx"
-                    className="h-11 bg-white border-slate-300 focus-visible:ring-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <label className="flex items-start gap-2.5 mt-3 pt-3 border-t border-slate-100 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={notifySms}
-                  onChange={(e) => setNotifySms(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                />
-                <span className="text-xs md:text-sm text-slate-600">
-                  Gửi thông báo cập nhật lịch diễn, mã số cổng soát vé và nhắc
-                  nhở sự kiện qua SMS / Email.
-                </span>
-              </label>
-            </section>
-
-            {/* Step 2: Delivery Method */}
-            <section className="bg-white rounded-xl border border-slate-200 p-6 md:p-7 shadow-xs">
-              <div className="flex items-center gap-3 pb-4 mb-4 border-b border-slate-100">
-                <span className="h-7 w-7 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
-                  2
-                </span>
-                <h2 className="text-lg md:text-xl font-bold text-slate-900 tracking-tight">
-                  Hình thức nhận vé
-                </h2>
-              </div>
-
-              <div className="p-4 md:p-5 rounded-xl border-2 border-emerald-600 bg-emerald-50/50 flex items-start sm:items-center justify-between gap-4">
-                <div className="flex items-start sm:items-center gap-4">
-                  <div className="h-11 w-11 rounded-lg bg-white border border-emerald-200 text-emerald-700 flex items-center justify-center shrink-0 shadow-2xs">
-                    <QrCode className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm md:text-base text-emerald-950">
-                      Vé điện tử kèm mã QR động (E-Ticket Dynamic QR)
-                    </h3>
-                    <p className="text-xs md:text-sm text-emerald-800/90 mt-0.5">
-                      Chữ ký số Ed25519 tự động xuất hiện trong mục Vé của tôi
-                      và gửi về email ngay sau khi thanh toán.
-                    </p>
-                  </div>
-                </div>
-                <span className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-xs font-bold uppercase tracking-wider shrink-0">
-                  Miễn phí
-                </span>
-              </div>
-            </section>
-
-            {/* Step 3: Payment Method & Voucher */}
-            <section className="bg-white rounded-xl border border-slate-200 p-6 md:p-7 shadow-xs">
-              <div className="flex items-center gap-3 pb-4 mb-5 border-b border-slate-100">
-                <span className="h-7 w-7 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
-                  3
-                </span>
-                <h2 className="text-lg md:text-xl font-bold text-slate-900 tracking-tight">
-                  Phương thức thanh toán
-                </h2>
-              </div>
-
-              {/* Payment selector cards */}
-              <div className="space-y-3 mb-6">
-                {/* VNPay-QR */}
-                <label
-                  onClick={() => setPaymentMethod("vnpay_qr")}
-                  className={`flex items-start gap-4 p-4 md:p-5 rounded-xl border-2 cursor-pointer transition-all ${
-                    paymentMethod === "vnpay_qr"
-                      ? "border-emerald-600 bg-emerald-50/40 shadow-xs"
-                      : "border-slate-200 hover:border-slate-300 bg-white"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="paymentMethod"
-                    value="vnpay_qr"
-                    checked={paymentMethod === "vnpay_qr"}
-                    onChange={() => setPaymentMethod("vnpay_qr")}
-                    className="mt-1 h-5 w-5 text-emerald-600 border-slate-300 focus:ring-emerald-500"
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm md:text-base text-slate-900">
-                        Cổng VNPay - Quét mã VNPay-QR
-                      </span>
-                      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-600 text-white uppercase tracking-wider">
-                        Khuyên dùng
-                      </span>
-                    </div>
-                    <p className="text-xs md:text-sm text-slate-500 mt-1">
-                      Mở ứng dụng Mobile Banking của hơn 30 ngân hàng
-                      (Vietcombank, Techcombank, BIDV, MB...) hoặc ví VNPay để
-                      quét mã tức thì.
-                    </p>
-                  </div>
-                </label>
-
-                {/* Napas ATM */}
-                <label
-                  onClick={() => setPaymentMethod("vnpay_atm")}
-                  className={`flex items-start gap-4 p-4 md:p-5 rounded-xl border-2 cursor-pointer transition-all ${
-                    paymentMethod === "vnpay_atm"
-                      ? "border-emerald-600 bg-emerald-50/40 shadow-xs"
-                      : "border-slate-200 hover:border-slate-300 bg-white"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="paymentMethod"
-                    value="vnpay_atm"
-                    checked={paymentMethod === "vnpay_atm"}
-                    onChange={() => setPaymentMethod("vnpay_atm")}
-                    className="mt-1 h-5 w-5 text-emerald-600 border-slate-300 focus:ring-emerald-500"
-                  />
-                  <div className="flex-1">
-                    <span className="font-bold text-sm md:text-base text-slate-900">
-                      Thẻ ATM / Tài khoản ngân hàng nội địa
-                    </span>
-                    <p className="text-xs md:text-sm text-slate-500 mt-1">
-                      Thanh toán qua mạng lưới liên minh Napas kết nối hơn 40
-                      ngân hàng thương mại tại Việt Nam.
-                    </p>
-                  </div>
-                </label>
-
-                {/* International Cards */}
-                <label
-                  onClick={() => setPaymentMethod("vnpay_intl")}
-                  className={`flex items-start gap-4 p-4 md:p-5 rounded-xl border-2 cursor-pointer transition-all ${
-                    paymentMethod === "vnpay_intl"
-                      ? "border-emerald-600 bg-emerald-50/40 shadow-xs"
-                      : "border-slate-200 hover:border-slate-300 bg-white"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="paymentMethod"
-                    value="vnpay_intl"
-                    checked={paymentMethod === "vnpay_intl"}
-                    onChange={() => setPaymentMethod("vnpay_intl")}
-                    className="mt-1 h-5 w-5 text-emerald-600 border-slate-300 focus:ring-emerald-500"
-                  />
-                  <div className="flex-1">
-                    <span className="font-bold text-sm md:text-base text-slate-900">
-                      Thẻ thanh toán quốc tế (Visa, MasterCard, JCB)
-                    </span>
-                    <p className="text-xs md:text-sm text-slate-500 mt-1">
-                      Hỗ trợ thẻ tín dụng và thẻ ghi nợ quốc tế phát hành bởi
-                      các ngân hàng trong nước và quốc tế.
-                    </p>
-                  </div>
-                </label>
-              </div>
-
-              {/* Voucher Code Box */}
-              <div className="bg-slate-50 rounded-xl border border-dashed border-slate-300 p-4 mb-6">
-                <label className="block text-xs md:text-sm font-semibold text-slate-700 mb-2">
-                  Mã giảm giá / Khuyến mãi (Voucher)
-                </label>
-                <div className="flex gap-2.5">
-                  <Input
-                    type="text"
-                    value={voucherCode}
-                    onChange={(e) => setVoucherCode(e.target.value)}
-                    placeholder="Ví dụ: TICKET50K"
-                    className="uppercase h-11 bg-white border-slate-300 font-mono tracking-wider"
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={handleApplyVoucher}
-                    className="h-11 px-5 font-bold shrink-0 bg-slate-800 text-white hover:bg-slate-900"
-                  >
-                    Áp dụng
-                  </Button>
-                </div>
-
-                {voucherAppliedCode && (
-                  <p className="text-xs md:text-sm text-emerald-700 font-medium mt-2 flex items-center gap-1.5">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Đã áp dụng mã {voucherAppliedCode}: Giảm{" "}
-                    {voucherDiscount.toLocaleString("vi-VN")} ₫
-                  </p>
-                )}
-                {voucherError && (
-                  <p className="text-xs md:text-sm text-red-600 font-medium mt-2 flex items-center gap-1.5">
-                    <AlertTriangle className="h-4 w-4" />
-                    {voucherError}
-                  </p>
-                )}
-              </div>
-
-              {paymentError && (
-                <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm font-medium mb-4 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 shrink-0" />
-                  <span>{paymentError}</span>
-                </div>
-              )}
-
-              {/* Main Checkout Button */}
+              {/* Prev / Next buttons */}
               <button
                 type="button"
-                disabled={isExpired || isSubmittingPayment}
-                onClick={handlePaymentSubmit}
-                className="w-full h-14 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold text-base md:text-lg rounded-xl shadow-lg shadow-emerald-600/25 transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:cursor-not-allowed hover:-translate-y-0.5 active:translate-y-0"
+                onClick={() =>
+                  setCurrentSlide((prev) =>
+                    prev === 0 ? carouselImages.length - 1 : prev - 1,
+                  )
+                }
+                aria-label="Ảnh trước"
+                className="absolute left-3 top-1/2 -translate-y-1/2 h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-background/90 hover:bg-background text-foreground shadow-md flex items-center justify-center transition-transform hover:scale-105 border border-border/50"
               >
-                <Lock className="h-5 w-5" />
-                <span>
-                  {isSubmittingPayment
-                    ? "Đang kết nối cổng thanh toán..."
-                    : `Xác nhận & Thanh toán ngay: ${finalTotal.toLocaleString("vi-VN")} ₫`}
-                </span>
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setCurrentSlide((prev) =>
+                    prev === carouselImages.length - 1 ? 0 : prev + 1,
+                  )
+                }
+                aria-label="Ảnh kế tiếp"
+                className="absolute right-3 top-1/2 -translate-y-1/2 h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-background/90 hover:bg-background text-foreground shadow-md flex items-center justify-center transition-transform hover:scale-105 border border-border/50"
+              >
+                <ChevronRight className="h-4 w-4" />
               </button>
 
-              <div className="mt-3.5 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
-                <span>
-                  Giao dịch được mã hóa 256-bit SSL bảo mật theo tiêu chuẩn
-                  thanh toán VNPay.
-                </span>
+              {/* Dots */}
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+                {carouselImages.map((_, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setCurrentSlide(idx)}
+                    aria-label={`Chuyển tới ảnh ${idx + 1}`}
+                    className={`h-2 rounded-full transition-all ${
+                      currentSlide === idx
+                        ? "w-5 bg-white"
+                        : "w-2 bg-white/60 hover:bg-white/80"
+                    }`}
+                  />
+                ))}
               </div>
-            </section>
+            </div>
+
+            {/* Ticket Class & Auto-Allocated Seats Heading */}
+            <div className="space-y-1">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
+                {ticketItem.ticketTypeName ||
+                  ticketItem.zoneName ||
+                  "VIP 1 (Khán đài A)"}
+              </h1>
+
+              <div className="text-sm sm:text-base text-muted-foreground flex items-center gap-2 flex-wrap pt-0.5">
+                <span>{ticketItem.quantity} vé · Ngồi liền kề</span>
+                <span>•</span>
+                {ticketItem.isStanding ? (
+                  <span className="font-semibold text-foreground">
+                    Khu vực: GA - Fanzone (Vé đứng)
+                  </span>
+                ) : (
+                  <span className="font-semibold text-foreground">
+                    {ticketItem.seats && ticketItem.seats.length > 0
+                      ? ticketItem.seats.join(", ")
+                      : "Hàng G - Ghế 14, Hàng G - Ghế 15"}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Chips Row */}
+            <div className="flex items-center gap-2 flex-wrap pt-1">
+              {/* High demand */}
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-destructive/10 text-destructive border border-destructive/20">
+                <Flame className="h-3.5 w-3.5 text-destructive" />
+                <span>Nhu cầu cao</span>
+              </span>
+
+              {/* Rating badge */}
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-primary text-primary-foreground shadow-2xs">
+                <span>8.3 Tuyệt vời</span>
+                <Info className="h-3 w-3 opacity-80" />
+              </span>
+
+              {/* Neutral: E-ticket */}
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-muted text-foreground border border-border">
+                <QrCode className="h-3.5 w-3.5 text-muted-foreground" />
+                <span>Vé điện tử (QR động)</span>
+              </span>
+
+              {/* Neutral: Artist / Award */}
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-secondary text-secondary-foreground border border-border">
+                <Award className="h-3.5 w-3.5 text-muted-foreground" />
+                <span>Nghệ sĩ đoạt giải</span>
+              </span>
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-border my-6" />
+
+            {/* Feature List (5 Icons in Rounded Muted Squares) */}
+            <div className="space-y-4 pt-1">
+              {/* Feature 1 */}
+              <div className="flex items-start gap-3.5">
+                <div className="h-10 w-10 rounded-xl bg-muted border border-border flex items-center justify-center text-primary shrink-0 shadow-2xs">
+                  <Zap className="h-5 w-5" />
+                </div>
+                <div className="space-y-0.5">
+                  <h2 className="text-sm sm:text-base font-bold text-foreground">
+                    Giá vé niêm yết tối ưu
+                  </h2>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Mức giá niêm yết chính thức từ Ban tổ chức, đảm bảo minh
+                    bạch và không phát sinh phí ẩn.
+                  </p>
+                </div>
+              </div>
+
+              {/* Feature 2 */}
+              <div className="flex items-start gap-3.5">
+                <div className="h-10 w-10 rounded-xl bg-muted border border-border flex items-center justify-center text-primary shrink-0 shadow-2xs">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div className="space-y-0.5">
+                  <h2 className="text-sm sm:text-base font-bold text-foreground">
+                    Lựa chọn được ưa chuộng nhất
+                  </h2>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Hạng vé sở hữu vị trí đắc địa và được đông đảo khán giả quan
+                    tâm đặt trước.
+                  </p>
+                </div>
+              </div>
+
+              {/* Feature 3 */}
+              <div className="flex items-start gap-3.5">
+                <div className="h-10 w-10 rounded-xl bg-muted border border-border flex items-center justify-center text-primary shrink-0 shadow-2xs">
+                  <Eye className="h-5 w-5" />
+                </div>
+                <div className="space-y-0.5">
+                  <h2 className="text-sm sm:text-base font-bold text-foreground">
+                    Tầm nhìn rõ nét không bị che khuất
+                  </h2>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Vị trí khán đài trực diện sân khấu, âm thanh tiêu chuẩn quốc
+                    tế chân thực và sống động.
+                  </p>
+                </div>
+              </div>
+
+              {/* Feature 4 */}
+              <div className="flex items-start gap-3.5">
+                <div className="h-10 w-10 rounded-xl bg-muted border border-border flex items-center justify-center text-primary shrink-0 shadow-2xs">
+                  <Users className="h-5 w-5" />
+                </div>
+                <div className="space-y-0.5">
+                  <h2 className="text-sm sm:text-base font-bold text-foreground">
+                    Ghế ngồi phân bổ liền kề nhau
+                  </h2>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Hệ thống tự động phân bổ và giữ các vị trí ghế nằm cạnh nhau
+                    trong cùng một hàng ghế.
+                  </p>
+                </div>
+              </div>
+
+              {/* Feature 5 */}
+              <div className="flex items-start gap-3.5">
+                <div className="h-10 w-10 rounded-xl bg-muted border border-border flex items-center justify-center text-primary shrink-0 shadow-2xs">
+                  <QrCode className="h-5 w-5" />
+                </div>
+                <div className="space-y-0.5">
+                  <h2 className="text-sm sm:text-base font-bold text-foreground">
+                    Xuất vé điện tử QR tức thì
+                  </h2>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Mã QR động chữ ký số Ed25519 tự động hiển thị trong mục Vé
+                    của tôi ngay sau khi thanh toán.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Right Column: Order Summary & Guarantee (Col Span 5-4) */}
-          <aside className="lg:col-span-5 xl:col-span-4 space-y-6 lg:sticky lg:top-24">
-            {/* Summary Card */}
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-              {/* Event Banner */}
-              <div className="relative h-36 bg-gradient-to-br from-emerald-900 via-emerald-800 to-teal-900 p-5 text-white flex flex-col justify-end">
-                <span className="absolute top-4 left-4 px-2.5 py-0.5 rounded bg-black/40 backdrop-blur-xs text-[11px] font-bold tracking-wider uppercase">
-                  Sự kiện trực tiếp
-                </span>
-                <h3 className="text-lg md:text-xl font-extrabold leading-snug tracking-tight">
-                  {order.eventTitle || eventData.title}
-                </h3>
+          {/* RIGHT COLUMN (~40% inside 12-col grid: col-span-5, Sticky) */}
+          <div className="lg:col-span-5 space-y-5 lg:sticky lg:top-24">
+            {/* ONE SMALL WHITE CARD */}
+            <div className="bg-card border border-border rounded-xl overflow-hidden shadow-xs">
+              {/* Accent Banner: "Những vé này sắp thuộc về bạn!" */}
+              <div className="bg-accent text-accent-foreground px-4 py-2.5 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b border-border/40">
+                <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                <span>Những vé này sắp thuộc về bạn!</span>
               </div>
 
-              <div className="p-5 md:p-6 space-y-4">
-                {/* Time & Venue */}
-                <div className="space-y-2 text-xs md:text-sm text-slate-600">
-                  <div className="flex items-start gap-2.5">
-                    <Calendar className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>
-                      <strong>Thời gian:</strong>{" "}
-                      {order.eventDateTime || eventData.fullDateTime}
+              {/* Card Body */}
+              <div className="p-5 sm:p-6 space-y-4">
+                <h2 className="text-base sm:text-lg font-bold text-foreground">
+                  Tóm tắt đơn hàng
+                </h2>
+
+                {/* Ticket Count x Price Row */}
+                <div className="flex justify-between items-start text-xs sm:text-sm text-muted-foreground">
+                  <div>
+                    <span className="font-medium text-foreground">
+                      {ticketItem.quantity} x{" "}
+                      {ticketItem.ticketTypeName || "Vé VIP 1"}
                     </span>
+                    <div className="text-[11px] text-muted-foreground">
+                      {ticketItem.unitPrice
+                        ? `${ticketItem.unitPrice.toLocaleString("vi-VN")} ₫ mỗi vé`
+                        : "1.800.000 ₫ mỗi vé"}
+                    </div>
                   </div>
-                  <div className="flex items-start gap-2.5">
-                    <MapPin className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>
-                      <strong>Địa điểm:</strong>{" "}
-                      {order.eventVenue || eventData.venue}
-                    </span>
-                  </div>
+                  <span className="font-semibold text-foreground">
+                    {subtotal.toLocaleString("vi-VN")} ₫
+                  </span>
                 </div>
 
-                <div className="h-px bg-slate-100" />
-
-                {/* Auto-allocated Seats Display (UC04 Compliant) */}
-                <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-2.5">
-                  {order.items.map((item, idx) => (
-                    <div key={idx} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-sm text-slate-900">
-                          {item.ticketTypeName ||
-                            item.zoneName ||
-                            "Khu vực VIP"}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-slate-900 text-white text-xs font-bold">
-                          {item.quantity} Vé
-                        </span>
-                      </div>
-
-                      {item.isStanding ? (
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-white border border-emerald-300 text-emerald-800 font-bold text-xs">
-                          <Ticket className="h-3.5 w-3.5 text-emerald-600" />
-                          <span>Khu vực: GA - Fanzone (Vé đứng)</span>
-                        </div>
-                      ) : (
-                        <div>
-                          <div className="text-[11px] text-slate-500 mb-1.5">
-                            Vị trí ghế được hệ thống tự động phân bổ liền kề:
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {item.seats && item.seats.length > 0 ? (
-                              item.seats.map((seat, sIdx) => (
-                                <span
-                                  key={sIdx}
-                                  className="px-2.5 py-1 rounded-md bg-white border border-emerald-300 text-emerald-800 font-bold text-xs shadow-2xs"
-                                >
-                                  {seat}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="px-2.5 py-1 rounded-md bg-white border border-emerald-300 text-emerald-800 font-bold text-xs">
-                                Đang tự động cấp phát ghế...
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                {/* Service fee row */}
+                <div className="flex justify-between text-xs sm:text-sm text-muted-foreground">
+                  <span>Phí dịch vụ nền tảng</span>
+                  <span className="font-medium text-foreground">
+                    {platformFee.toLocaleString("vi-VN")} ₫
+                  </span>
                 </div>
 
-                {/* Pricing Breakdown */}
-                <div className="space-y-2.5 text-xs md:text-sm text-slate-600">
-                  <div className="flex justify-between">
-                    <span>Giá vé gốc</span>
-                    <span className="font-medium text-slate-900">
-                      {subtotal.toLocaleString("vi-VN")} ₫
-                    </span>
+                {/* Voucher Discount if applied */}
+                {voucherDiscount > 0 && (
+                  <div className="flex justify-between text-xs sm:text-sm text-primary font-semibold">
+                    <span>Mã giảm giá ({voucherAppliedCode})</span>
+                    <span>- {voucherDiscount.toLocaleString("vi-VN")} ₫</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Phí dịch vụ nền tảng</span>
-                    <span className="font-medium text-slate-900">
-                      {platformFee.toLocaleString("vi-VN")} ₫
-                    </span>
-                  </div>
+                )}
 
-                  {voucherDiscount > 0 && (
-                    <div className="flex justify-between text-emerald-700 font-semibold">
-                      <span>Mã giảm giá ({voucherAppliedCode})</span>
-                      <span>- {voucherDiscount.toLocaleString("vi-VN")} ₫</span>
-                    </div>
-                  )}
-
-                  <div className="pt-3 border-t border-slate-200 flex justify-between items-baseline">
-                    <span className="text-sm md:text-base font-bold text-slate-900">
-                      Tổng thanh toán
+                {/* Divider */}
+                <div className="border-t border-border pt-3">
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-sm sm:text-base font-bold text-foreground">
+                      Tổng cộng
                     </span>
                     <div className="text-right">
-                      <span className="text-xl md:text-2xl font-black text-emerald-600">
+                      <span className="text-xl sm:text-2xl font-black text-foreground">
                         {finalTotal.toLocaleString("vi-VN")} ₫
                       </span>
-                      <div className="text-[11px] text-slate-400">
+                      <div className="text-[11px] text-muted-foreground">
                         Đã bao gồm thuế GTGT (VAT)
                       </div>
                     </div>
                   </div>
                 </div>
+
+                {/* Full-width Primary "Tiếp tục" Button */}
+                <Button
+                  type="button"
+                  onClick={() => setShowPaymentModal(true)}
+                  disabled={isExpired}
+                  className="w-full h-11 sm:h-12 text-sm sm:text-base font-bold bg-primary text-primary-foreground hover:bg-primary/90 rounded-md shadow-xs flex items-center justify-center gap-2 cursor-pointer mt-2"
+                >
+                  <span>Tiếp tục</span>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 
-            {/* 100% Guarantee Trust Card */}
-            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
-              <div className="flex items-center gap-2.5 font-bold text-sm text-slate-900">
-                <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                <span>Cam kết đảm bảo 100% từ TicketHub</span>
+            {/* BELOW THE CARD (No Box, Two Trust Rows) */}
+            <div className="space-y-4 pt-1 px-1">
+              {/* Row 1 */}
+              <div className="flex items-start gap-3">
+                <ShieldCheck className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div className="text-xs sm:text-sm font-bold text-foreground">
+                    100% Cam kết từ TicketHub
+                  </div>
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    Mọi đơn hàng đều được đảm bảo vé chính hãng hợp lệ tại cổng
+                    soát vé sự kiện.
+                  </div>
+                </div>
               </div>
-              <ul className="space-y-2 text-xs text-slate-600 leading-relaxed">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>
-                    100% Vé chính hãng được cấp phát trực tiếp từ Ban tổ chức sự
-                    kiện.
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>
-                    Mã QR động Ed25519 tự động đổi mỗi 30 giây chống chụp màn
-                    hình và vé lậu.
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>
-                    Tự động hoàn tiền 100% nếu phiên giữ chỗ quá hạn hoặc lỗi
-                    kết nối cổng VNPay.
-                  </span>
-                </li>
-              </ul>
+
+              {/* Row 2 */}
+              <div className="flex items-start gap-3">
+                <Lock className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div className="text-xs sm:text-sm font-bold text-foreground">
+                    Bảo vệ giao dịch an toàn
+                  </div>
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    Tự động hoàn tiền 100% nếu phiên giữ chỗ quá hạn hoặc xảy ra
+                    sự cố.
+                  </div>
+                </div>
+              </div>
             </div>
-          </aside>
+          </div>
         </div>
       </main>
 
-      {/* Expiration Modal */}
-      {isExpired && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="h-14 w-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center mx-auto">
-              <Clock className="h-8 w-8" />
+      {/* MOBILE STICKY BOTTOM BAR (Visible only on < lg screens) */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-background/95 backdrop-blur-md border-t border-border px-4 py-3 flex items-center justify-between gap-3 shadow-lg">
+        <div>
+          <div className="text-[11px] text-muted-foreground">
+            Tổng cộng (Đã gồm VAT)
+          </div>
+          <div className="text-base sm:text-lg font-black text-foreground">
+            {finalTotal.toLocaleString("vi-VN")} ₫
+          </div>
+        </div>
+        <Button
+          type="button"
+          onClick={() => setShowPaymentModal(true)}
+          disabled={isExpired}
+          className="h-10 px-5 text-sm font-bold bg-primary text-primary-foreground hover:bg-primary/90 rounded-md shadow-xs flex items-center gap-1.5 cursor-pointer"
+        >
+          <span>Tiếp tục</span>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* 3. FOOTER */}
+      <footer className="w-full border-t border-border bg-background mt-16 py-6 sm:py-8">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
+          {/* Left: Legal Links */}
+          <div className="flex items-center gap-4 sm:gap-6 flex-wrap justify-center md:justify-start">
+            <Link
+              href="/terms"
+              className="hover:text-foreground transition-colors"
+            >
+              Điều khoản sử dụng
+            </Link>
+            <Link
+              href="/privacy"
+              className="hover:text-foreground transition-colors"
+            >
+              Chính sách bảo mật
+            </Link>
+            <Link
+              href="/guarantee"
+              className="hover:text-foreground transition-colors"
+            >
+              Cam kết bảo vệ vé 100%
+            </Link>
+            <Link
+              href="/help"
+              className="hover:text-foreground transition-colors"
+            >
+              Trợ giúp
+            </Link>
+          </div>
+
+          {/* Center: Guarantee Badge */}
+          <div className="flex items-center gap-2 font-medium text-foreground">
+            <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
+            <span>Mọi đơn hàng đều được cam kết 100% chính hãng</span>
+          </div>
+
+          {/* Right: Copyright */}
+          <div className="text-center md:text-right">
+            © 2026 TicketHub. All Rights Reserved.
+          </div>
+        </div>
+      </footer>
+
+      {/* MODAL: PAYMENT & RECIPIENT INFORMATION (Triggered by "Tiếp tục") */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-card border border-border rounded-xl max-w-lg w-full p-6 text-foreground space-y-5 shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <h2 className="text-lg font-bold text-foreground">
+                Thông tin nhận vé & Thanh toán
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
-            <h3 className="text-xl font-bold text-slate-900">
+
+            {/* Recipient details form */}
+            <div className="space-y-3.5">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">
+                    Họ và tên lót <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Nguyễn Văn"
+                    className="h-10 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">
+                    Tên <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="An"
+                    className="h-10 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Email nhận vé điện tử{" "}
+                  <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  className="h-10 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Số điện thoại liên hệ{" "}
+                  <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="09xxxxxxxx"
+                  className="h-10 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Payment Method Selector */}
+            <div className="space-y-2 pt-1">
+              <label className="block text-xs font-semibold text-foreground">
+                Chọn phương thức thanh toán VNPay
+              </label>
+
+              <div className="space-y-2">
+                <label
+                  onClick={() => setPaymentMethod("vnpay_qr")}
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    paymentMethod === "vnpay_qr"
+                      ? "border-primary bg-accent/60"
+                      : "border-border hover:bg-muted/50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="modalPaymentMethod"
+                    checked={paymentMethod === "vnpay_qr"}
+                    onChange={() => setPaymentMethod("vnpay_qr")}
+                    className="text-primary accent-primary"
+                  />
+                  <div className="flex-1 text-xs">
+                    <div className="font-bold text-foreground flex items-center gap-2">
+                      <span>Cổng VNPay - Quét mã VNPay-QR</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary text-primary-foreground">
+                        Khuyên dùng
+                      </span>
+                    </div>
+                    <div className="text-muted-foreground mt-0.5">
+                      Ứng dụng Mobile Banking hoặc ví điện tử VNPay
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  onClick={() => setPaymentMethod("vnpay_atm")}
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    paymentMethod === "vnpay_atm"
+                      ? "border-primary bg-accent/60"
+                      : "border-border hover:bg-muted/50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="modalPaymentMethod"
+                    checked={paymentMethod === "vnpay_atm"}
+                    onChange={() => setPaymentMethod("vnpay_atm")}
+                    className="text-primary accent-primary"
+                  />
+                  <div className="flex-1 text-xs">
+                    <div className="font-bold text-foreground">
+                      Thẻ ATM / Tài khoản ngân hàng nội địa
+                    </div>
+                    <div className="text-muted-foreground mt-0.5">
+                      Liên minh cổng thanh toán Napas hơn 40 ngân hàng
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  onClick={() => setPaymentMethod("vnpay_intl")}
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    paymentMethod === "vnpay_intl"
+                      ? "border-primary bg-accent/60"
+                      : "border-border hover:bg-muted/50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="modalPaymentMethod"
+                    checked={paymentMethod === "vnpay_intl"}
+                    onChange={() => setPaymentMethod("vnpay_intl")}
+                    className="text-primary accent-primary"
+                  />
+                  <div className="flex-1 text-xs">
+                    <div className="font-bold text-foreground">
+                      Thẻ thanh toán quốc tế (Visa, MasterCard, JCB)
+                    </div>
+                    <div className="text-muted-foreground mt-0.5">
+                      Thẻ tín dụng / ghi nợ quốc tế phát hành toàn cầu
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Voucher input row */}
+            <div className="pt-1">
+              <label className="block text-xs font-semibold text-foreground mb-1.5">
+                Mã giảm giá (Voucher)
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  value={voucherCode}
+                  onChange={(e) => setVoucherCode(e.target.value)}
+                  placeholder="Ví dụ: TICKET50K"
+                  className="uppercase h-10 text-xs font-mono"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleApplyVoucher}
+                  className="h-10 text-xs font-bold px-4 shrink-0"
+                >
+                  Áp dụng
+                </Button>
+              </div>
+              {voucherAppliedCode && (
+                <p className="text-xs text-primary font-medium mt-1.5 flex items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Đã áp dụng mã {voucherAppliedCode}: Giảm{" "}
+                  {voucherDiscount.toLocaleString("vi-VN")} ₫
+                </p>
+              )}
+              {voucherError && (
+                <p className="text-xs text-destructive font-medium mt-1.5">
+                  {voucherError}
+                </p>
+              )}
+            </div>
+
+            {paymentError && (
+              <div className="p-3 rounded-md bg-destructive/10 text-destructive text-xs font-medium">
+                {paymentError}
+              </div>
+            )}
+
+            {/* Final Action Button */}
+            <div className="pt-2">
+              <Button
+                type="button"
+                disabled={isExpired || isSubmittingPayment}
+                onClick={handlePaymentSubmit}
+                className="w-full h-12 text-sm font-bold bg-primary text-primary-foreground hover:bg-primary/90 rounded-md shadow-xs cursor-pointer"
+              >
+                <Lock className="h-4 w-4 mr-1.5" />
+                <span>
+                  {isSubmittingPayment
+                    ? "Đang kết nối cổng thanh toán..."
+                    : `Thanh toán ngay: ${finalTotal.toLocaleString("vi-VN")} ₫`}
+                </span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: INFO ABOUT HOLD TIMER */}
+      {showInfoModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl max-w-sm w-full p-5 text-foreground space-y-3 shadow-xl">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
+                <Clock className="h-4 w-4 text-primary" />
+                <span>Quy định giữ chỗ 5 phút</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowInfoModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Nhằm đảm bảo sự công bằng cho tất cả người mua, vé của bạn sẽ được
+              hệ thống tạm khóa và giữ trong đúng 5 phút (300 giây). Nếu quá hạn
+              trên, vé sẽ tự động được trả lại kho vé chung.
+            </p>
+            <Button
+              type="button"
+              onClick={() => setShowInfoModal(false)}
+              className="w-full h-9 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              Đã hiểu
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EXPIRATION TIMEOUT */}
+      {isExpired && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl">
+            <div className="h-12 w-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+              <Clock className="h-6 w-6" />
+            </div>
+            <h3 className="text-lg font-bold text-foreground">
               Hết thời gian giữ chỗ (05:00)
             </h3>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Thời hạn giữ vé 5 phút của bạn đã kết thúc. Hệ thống đã tự động
-              giải phóng vị trí ghế này để bảo đảm quyền lợi cho các khách hàng
-              khác.
+            <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+              Thời hạn giữ vé 5 phút đã kết thúc. Hệ thống đã tự động giải phóng
+              vị trí ghế này để bảo đảm công bằng cho các khách hàng khác.
             </p>
             <div className="pt-2">
               <Button
+                type="button"
                 onClick={() => router.push("/events")}
-                className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                className="w-full h-11 bg-primary text-primary-foreground hover:bg-primary/90 font-bold"
               >
                 Quay về trang sự kiện
               </Button>
@@ -833,33 +1099,36 @@ function CheckoutContent() {
         </div>
       )}
 
-      {/* Cancel Reservation Confirmation Modal */}
+      {/* MODAL: CANCEL CONFIRMATION */}
       {showCancelModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="h-14 w-14 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center mx-auto">
-              <AlertTriangle className="h-8 w-8 text-amber-600" />
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl">
+            <div className="h-12 w-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+              <AlertTriangle className="h-6 w-6 text-destructive" />
             </div>
-            <h3 className="text-xl font-bold text-slate-900">
+            <h3 className="text-lg font-bold text-foreground">
               Xác nhận hủy giữ chỗ?
             </h3>
-            <p className="text-sm text-slate-600 leading-relaxed">
+            <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
               Vé của bạn sẽ được hoàn trả về kho vé ngay lập tức để người khác
               có thể đặt mua. Bạn có chắc chắn muốn hủy giao dịch này không?
             </p>
             <div className="grid grid-cols-2 gap-3 pt-2">
               <Button
+                type="button"
                 variant="outline"
                 disabled={isCancelling}
                 onClick={() => setShowCancelModal(false)}
-                className="h-11 font-semibold"
+                className="h-10 text-xs sm:text-sm font-semibold"
               >
                 Tiếp tục đặt vé
               </Button>
               <Button
+                type="button"
+                variant="destructive"
                 disabled={isCancelling}
                 onClick={confirmCancelHold}
-                className="h-11 bg-red-600 hover:bg-red-700 text-white font-bold"
+                className="h-10 text-xs sm:text-sm font-bold bg-destructive text-white hover:bg-destructive/90"
               >
                 {isCancelling ? "Đang hủy..." : "Hủy giữ chỗ"}
               </Button>
@@ -875,11 +1144,11 @@ export default function CheckoutPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="min-h-screen bg-background flex items-center justify-center">
           <div className="text-center space-y-3">
-            <div className="h-8 w-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
-            <p className="text-sm text-slate-500 font-medium">
-              Đang tải thông tin thanh toán...
+            <div className="h-8 w-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-sm text-muted-foreground font-medium">
+              Đang tải thông tin đặt vé...
             </p>
           </div>
         </div>
