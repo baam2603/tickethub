@@ -953,7 +953,13 @@ function EventSplitView({ event }: { event: EventItem }) {
               <div className="space-y-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => setShowSubtotalModal(true)}
+                  onClick={() => {
+                    if (holdOrderId) {
+                      router.push(`/checkout?orderId=${holdOrderId}`);
+                    } else {
+                      setShowSubtotalModal(true);
+                    }
+                  }}
                   className="w-full h-11 rounded-[10px] bg-primary hover:bg-emerald-700 text-white text-[14px] font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
                 >
                   <CheckCircle2 className="size-4.5" />
@@ -1055,7 +1061,8 @@ function EventSplitView({ event }: { event: EventItem }) {
             <div className="flex items-center gap-2 text-[12px] text-muted-foreground bg-emerald-50/70 border border-emerald-100 rounded-[8px] p-2.5">
               <ShieldCheck className="size-4 text-primary shrink-0" />
               <span>
-                Thanh toán VNPay sẽ được bổ sung ở giai đoạn sau (UC05).
+                Thanh toán an toàn qua cổng VNPay với cam kết 100% vé chính
+                hãng.
               </span>
             </div>
 
@@ -1063,11 +1070,16 @@ function EventSplitView({ event }: { event: EventItem }) {
             <div className="space-y-2 pt-1">
               <button
                 type="button"
-                disabled
-                className="w-full h-11 rounded-[10px] bg-primary/40 text-white text-[14px] font-bold flex items-center justify-center gap-2 cursor-not-allowed"
+                onClick={() => {
+                  setShowSubtotalModal(false);
+                  if (holdOrderId) {
+                    router.push(`/checkout?orderId=${holdOrderId}`);
+                  }
+                }}
+                className="w-full h-11 rounded-[10px] bg-primary hover:bg-emerald-700 text-white text-[14px] font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
                 <CheckCircle2 className="size-4.5" />
-                Thanh toán VNPay (sắp ra mắt)
+                Tiếp tục đến trang Thanh toán
               </button>
               <button
                 type="button"

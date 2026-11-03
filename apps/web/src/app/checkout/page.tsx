@@ -15,8 +15,6 @@ import {
   ShieldCheck,
   Lock,
   QrCode,
-  MapPin,
-  Calendar,
   AlertTriangle,
   CheckCircle2,
   ChevronLeft,
@@ -27,16 +25,13 @@ import {
   Sparkles,
   Flame,
   Award,
-  Check,
   Eye,
   Users,
   Zap,
-  TrendingUp,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/providers/session-provider";
 import { EVENTS } from "@/lib/events-catalog";
 import { apiClient } from "@/lib/api/client";
@@ -89,7 +84,7 @@ function CheckoutContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
-  const { user, isAuthenticated } = useSession();
+  const { user } = useSession();
 
   const [order, setOrder] = useState<OrderDetailResponse>(DEFAULT_ORDER);
   const [isLoading, setIsLoading] = useState(Boolean(orderId));
@@ -134,30 +129,31 @@ function CheckoutContent() {
 
   // Autofill user info if authenticated
   useEffect(() => {
-    if (user) {
-      if (user.fullName) {
-        const parts = user.fullName.trim().split(" ");
-        if (parts.length > 1) {
-          setFirstName(parts[parts.length - 1]);
-          setLastName(parts.slice(0, parts.length - 1).join(" "));
-        } else {
-          setFirstName(parts[0]);
-          setLastName("");
+    queueMicrotask(() => {
+      if (user) {
+        if (user.fullName) {
+          const parts = user.fullName.trim().split(" ");
+          if (parts.length > 1) {
+            setFirstName(parts[parts.length - 1]);
+            setLastName(parts.slice(0, parts.length - 1).join(" "));
+          } else {
+            setFirstName(parts[0]);
+            setLastName("");
+          }
         }
+        if (user.email) setEmail(user.email);
+      } else {
+        setFirstName("Văn An");
+        setLastName("Nguyễn");
+        setEmail("nguyenvanan@gmail.com");
+        setPhone("0912345678");
       }
-      if (user.email) setEmail(user.email);
-    } else {
-      setFirstName("Văn An");
-      setLastName("Nguyễn");
-      setEmail("nguyenvanan@gmail.com");
-      setPhone("0912345678");
-    }
+    });
   }, [user]);
 
   // Load real order data from backend if orderId is provided
   useEffect(() => {
     if (!orderId) {
-      setIsLoading(false);
       return;
     }
 
@@ -166,12 +162,105 @@ function CheckoutContent() {
       try {
         const res = await apiClient<{
           success: boolean;
-          data: OrderDetailResponse;
+          data: unknown;
         }>(`/booking/orders/${orderId}`);
         if (isMounted && res.data) {
-          setOrder(res.data);
-          if (res.data.expiresAt) {
-            const expireTime = new Date(res.data.expiresAt).getTime();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const raw = res.data as any;
+          const itemMap = new Map<
+            string,
+            {
+              ticketTypeId: string;
+              ticketTypeName: string;
+              zoneName: string;
+              quantity: number;
+              unitPrice: number;
+              seats: string[];
+              isStanding: boolean;
+            }
+          >();
+
+          if (Array.isArray(raw.items)) {
+            for (const it of raw.items) {
+              const tid = it.ticketTypeId || it.ticketType?.id || "default";
+              const existing = itemMap.get(tid);
+              const seatLabel = it.seat
+                ? `Hàng ${it.seat.rowLabel} - Ghế ${it.seat.seatNumber}`
+                : undefined;
+              const isStanding =
+                it.isStanding ??
+                (it.ticketType ? !it.ticketType.isSeated : !seatLabel);
+              if (existing) {
+                existing.quantity += it.quantity || 1;
+                if (seatLabel) existing.seats.push(seatLabel);
+              } else {
+                itemMap.set(tid, {
+                  ticketTypeId: tid,
+                  ticketTypeName:
+                    it.ticketTypeName ||
+                    it.ticketType?.name ||
+                    it.zoneName ||
+                    "Vé tham dự",
+                  zoneName:
+                    it.zoneName ||
+                    it.seat?.zoneName ||
+                    it.ticketType?.name ||
+                    "Khu vực khán đài",
+                  quantity: it.quantity || 1,
+                  unitPrice: Number(
+                    it.unitPrice || it.ticketType?.price || it.price || 0,
+                  ),
+                  seats: Array.isArray(it.seats)
+                    ? it.seats
+                    : seatLabel
+                      ? [seatLabel]
+                      : [],
+                  isStanding,
+                });
+              }
+            }
+          }
+
+          const mappedOrder: OrderDetailResponse = {
+            orderId: raw.id || raw.orderId || orderId,
+            orderCode:
+              raw.orderCode ||
+              `ORD-${(raw.id || orderId).slice(0, 8).toUpperCase()}`,
+            status: raw.status || "PENDING",
+            totalAmount: Number(raw.totalAmount) || 0,
+            expiresAt: raw.expiresAt
+              ? new Date(raw.expiresAt).toISOString()
+              : new Date(Date.now() + 300 * 1000).toISOString(),
+            items:
+              itemMap.size > 0
+                ? Array.from(itemMap.values())
+                : DEFAULT_ORDER.items,
+            eventId: raw.eventId || raw.event?.id,
+            eventTitle:
+              raw.eventTitle || raw.event?.title || DEFAULT_ORDER.eventTitle,
+            eventVenue:
+              raw.eventVenue ||
+              [raw.event?.venueName, raw.event?.venueAddress, raw.event?.city]
+                .filter(Boolean)
+                .join(", ") ||
+              DEFAULT_ORDER.eventVenue,
+            eventDateTime: raw.eventDateTime
+              ? raw.eventDateTime
+              : raw.event?.startTime
+                ? new Date(raw.event.startTime).toLocaleString("vi-VN", {
+                    weekday: "short",
+                    day: "2-digit",
+                    month: "2-digit",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : DEFAULT_ORDER.eventDateTime,
+          };
+
+          setOrder(mappedOrder);
+          if (mappedOrder.expiresAt) {
+            const expireTime = new Date(mappedOrder.expiresAt).getTime();
             const now = Date.now();
             const diff = Math.max(0, Math.floor((expireTime - now) / 1000));
             setSecondsLeft(diff);

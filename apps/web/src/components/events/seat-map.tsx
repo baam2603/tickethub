@@ -6,6 +6,11 @@ import { VENUE_SVG, type VenueMapKey } from "@/lib/venue-svg.generated";
 import { formatVnd } from "@/lib/events-catalog";
 import { clampPanToMap } from "@/components/events/seat-map.utils";
 
+const RESERVED_ZONES: Record<string, string> = {
+  "11448": "Khu Đứng Ưu Tiên (Vé Ban Tổ Chức)",
+  "885": "Khu Vực Kỹ Thuật (Không mở bán)",
+};
+
 export interface SeatMapProps {
   mapKey: VenueMapKey;
   activeZoneId?: string | null;
@@ -86,12 +91,13 @@ function SeatMapView({
     viewBox: mapData.viewBox,
   });
 
-  // Tooltip for overview hover
+  // Tooltip for overview hover (Pre-PR12 horizontal tag: Name + Price/Status)
   const [tooltip, setTooltip] = useState<{
-    price: number;
+    zoneId: string;
     name: string;
-    count: number;
-    isSoldOut: boolean;
+    price: number;
+    isReserved?: boolean;
+    isSoldOut?: boolean;
     x: number;
     y: number;
   } | null>(null);
@@ -153,19 +159,40 @@ function SeatMapView({
       if (target) {
         const zid = target.getAttribute("data-zone");
         if (zid) {
-          const info = zoneInfoMap[zid];
-          const isSoldOut = !info || info.count <= 0;
           onHoverZone(zid);
-          const rect = containerRef.current?.getBoundingClientRect();
+          const rect = canvasRef.current?.getBoundingClientRect();
           if (rect) {
-            setTooltip({
-              price: info?.minPrice ?? 0,
-              name: info?.name ?? `Khu ${zid}`,
-              count: info?.count ?? 0,
-              isSoldOut,
-              x: e.clientX - rect.left,
-              y: e.clientY - rect.top,
-            });
+            if (zoneInfoMap[zid] && zoneInfoMap[zid].count > 0) {
+              setTooltip({
+                zoneId: zid,
+                name: zoneInfoMap[zid].name,
+                price: zoneInfoMap[zid].minPrice,
+                isReserved: false,
+                isSoldOut: false,
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+              });
+            } else if (RESERVED_ZONES[zid]) {
+              setTooltip({
+                zoneId: zid,
+                name: RESERVED_ZONES[zid],
+                price: 0,
+                isReserved: true,
+                isSoldOut: false,
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+              });
+            } else {
+              setTooltip({
+                zoneId: zid,
+                name: zoneInfoMap[zid]?.name ?? `Khu ${zid}`,
+                price: 0,
+                isReserved: false,
+                isSoldOut: true,
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+              });
+            }
           }
           return;
         }
@@ -321,28 +348,24 @@ function SeatMapView({
         {tooltip && (
           <div
             style={{
-              left: `${tooltip.x}px`,
-              top: `${tooltip.y - 12}px`,
+              left: `${tooltip.x + 12}px`,
+              top: `${tooltip.y - 36}px`,
               pointerEvents: "none",
             }}
-            className="absolute z-30 transform -translate-x-1/2 -translate-y-full bg-foreground text-white text-[12px] px-3 py-1.5 rounded-[6px] shadow-lg whitespace-nowrap pointer-events-none select-none"
+            className="absolute z-30 transform -translate-y-full bg-foreground text-white text-[12px] px-3 py-1.5 rounded-[8px] shadow-lg whitespace-nowrap flex items-center gap-2 pointer-events-none select-none"
           >
-            <div className="font-semibold text-background/90">
-              {tooltip.name}
-            </div>
-            {tooltip.isSoldOut ? (
-              <div className="font-bold text-red-300 font-mono text-[11px] pt-0.5">
-                Hết vé khả dụng
-              </div>
+            <span className="font-semibold">{tooltip.name}</span>
+            {tooltip.isReserved ? (
+              <span className="text-amber-400 font-medium">
+                Vé Ban Tổ Chức (Không mở bán)
+              </span>
+            ) : tooltip.isSoldOut ? (
+              <span className="text-red-400 font-medium">Hết vé</span>
             ) : (
-              <div className="font-bold text-emerald-200 font-mono">
-                Từ {formatVnd(tooltip.price)}
-                <span className="text-[11px] text-background/70 font-normal ml-1">
-                  ({tooltip.count} vé)
-                </span>
-              </div>
+              <span className="text-emerald-300 font-bold">
+                {formatVnd(tooltip.price)}
+              </span>
             )}
-            <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-foreground" />
           </div>
         )}
 
