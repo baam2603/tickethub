@@ -74,7 +74,13 @@ export class WaitingRoomRateLimitGuard implements CanActivate {
     } catch {
       // Waiting Room phu thuoc Redis.
       // Khong bo qua rate limit khi Redis loi.
-      throw new ServiceUnavailableException("Redis tam thoi khong kha dung");
+      throw new ServiceUnavailableException({
+        success: false,
+        error: {
+          code: "WAITING_ROOM_UNAVAILABLE",
+          message: "Hang cho tam thoi khong kha dung, vui long thu lai",
+        },
+      });
     }
 
     if (count > maxRequests) {

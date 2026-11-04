@@ -132,6 +132,15 @@ describe("W03-BE1: Waiting Room (UC03) & Atomic Seat Hold (UC04) Verification", 
       })
       .returning();
     waitingRoomEventId = wrEvent!.id;
+    await db.insert(ticketTypes).values({
+      eventId: waitingRoomEventId,
+      name: "GA hang cho",
+      price: "100000",
+      capacity: 100,
+      isSeated: false,
+      saleStartTime: now,
+      saleEndTime: startTime,
+    });
 
     // 4. Tạo sự kiện thông thường KHÔNG hàng chờ ảo để kiểm thử giữ chỗ
     const [regEvent] = await db

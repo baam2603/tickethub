@@ -4,6 +4,8 @@ import {
   and,
   asc,
   eq,
+  desc,
+  lt,
   gt,
   gte,
   inArray,
@@ -23,14 +25,14 @@ export class SearchService {
   async searchEvents(filters: SearchQuery) {
     const conditions: SQL[] = [eq(events.status, EventStatus.PUBLISHED)];
 
-    // 1. Tim kiem Full-Text tieng Viet khong dau
-    if (filters.keyword) {
-      conditions.push(
-        sql`${events.searchVector} @@ plainto_tsquery(
-          'simple',
-          unaccent(${filters.keyword})
-        )`,
-      );
+    // Bo qua full-text voi keyword duoi 2 ky tu, van giu cac bo loc.
+    const keyword = filters.keyword?.trim().normalize("NFC") ?? "";
+    const useFullText = Array.from(keyword).length >= 2;
+    const query = sql`plainto_tsquery('simple', unaccent(${keyword}))`;
+    const rank = sql<number>`ts_rank(${events.searchVector}, ${query})`;
+
+    if (useFullText) {
+      conditions.push(sql`${events.searchVector} @@ ${query}`);
     }
 
     // 2. Loc thanh pho
@@ -85,6 +87,7 @@ export class SearchService {
         .select({
           id: events.id,
           startTime: events.startTime,
+          rank: rank,
         })
         .from(events)
         .where(
@@ -99,13 +102,20 @@ export class SearchService {
         throw new BadRequestException("Cursor khong hop le");
       }
 
-      const nextPage = or(
+      const chronologicalNext = or(
         gt(events.startTime, cursorEvent.startTime),
         and(
           eq(events.startTime, cursorEvent.startTime),
           gt(events.id, cursorEvent.id),
         ),
       );
+
+      const nextPage = useFullText
+        ? or(
+            lt(rank, cursorEvent.rank),
+            and(eq(rank, cursorEvent.rank), chronologicalNext),
+          )
+        : chronologicalNext;
 
       if (nextPage) {
         conditions.push(nextPage);
@@ -117,7 +127,11 @@ export class SearchService {
       .select({ id: events.id })
       .from(events)
       .where(and(...conditions))
-      .orderBy(asc(events.startTime), asc(events.id))
+      .orderBy(
+        ...(useFullText ? [desc(rank)] : []),
+        asc(events.startTime),
+        asc(events.id),
+      )
       .limit(filters.limit + 1);
 
     const hasMore = rows.length > filters.limit;

@@ -195,6 +195,8 @@ Lấy thông tin người dùng đang đăng nhập thông qua Access Token Bear
 
 Tìm kiếm và lọc danh sách sự kiện, phân trang theo cursor.
 
+Keyword sau khi loại bỏ khoảng trắng đầu/cuối và chuẩn hóa Unicode có ít hơn 2 ký tự sẽ bỏ qua full-text search, nhưng vẫn áp dụng các bộ lọc. Với keyword từ 2 ký tự, kết quả ưu tiên `ts_rank` giảm dần, sau đó `startTime` tăng dần và `id` tăng dần để phân trang ổn định. Khi không dùng full-text, chỉ sắp theo `startTime`, `id`. Cursor là UUID sự kiện cuối trang; client phải giữ nguyên keyword và bộ lọc khi lấy trang kế tiếp.
+
 - Tham số truy vấn:
   - `keyword`: string (tìm kiếm tiếng Việt có dấu hoặc không dấu)
   - `city`: string
@@ -417,6 +419,13 @@ Gia nhập hàng chờ trước khi vào màn hình giữ chỗ và mua vé.
   }
 }
 ```
+
+Các trường hợp bổ sung áp dụng cho cả `join` và `heartbeat`:
+
+- HTTP 200, `data: { "status": "SOLD_OUT" }`: toàn bộ vé đã bán hết; xóa queue, active và heartbeat của sự kiện. Vé đang HELD chưa được xem là đã bán.
+- HTTP 200, `data: { "status": "ADMITTED", "orderId": "order-uuid" }`: người gọi có đơn PENDING còn hạn của chính sự kiện; client chuyển về đơn giữ chỗ đó, không xếp hàng lại. Không trả đơn của người khác hoặc đơn đã hết hạn.
+- Khi tắt hàng chờ, trả ADMITTED và xóa trạng thái queue, active, heartbeat. Job chạy mỗi 5 giây cũng dọn sự kiện đã tắt mà không cần client gửi thêm request.
+- HTTP 503, `error.code: "WAITING_ROOM_UNAVAILABLE"`: Redis không khả dụng. Kết nối và lệnh Redis có timeout 1 giây, không lưu lệnh vào offline queue; client có thể thử lại sau khi Redis phục hồi.
 
 #### `POST /api/v1/waiting-room/:eventId/heartbeat`
 

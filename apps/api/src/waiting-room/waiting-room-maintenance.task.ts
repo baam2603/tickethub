@@ -11,6 +11,7 @@ import { EventStatus } from "@tickethub/shared";
 
 import { db } from "../database/db";
 import { events } from "../database/schema";
+import { clearWaitingRoom } from "./waiting-room.redis";
 import { REDIS_CLIENT } from "../database/redis.module";
 
 const PROMOTE_SCRIPT = `
@@ -99,6 +100,7 @@ export class WaitingRoomMaintenanceTask
       .limit(1);
 
     if (!event || !event.isWaitingRoomEnabled) {
+      await clearWaitingRoom(this.redis, eventId);
       return;
     }
 

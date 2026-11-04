@@ -1,14 +1,17 @@
 import { Injectable, Inject, NotFoundException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import Redis from "ioredis";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { db } from "../database/db";
-import { events } from "../database/schema";
+import { events, orders, seats, ticketTypes } from "../database/schema";
 import { REDIS_CLIENT } from "../database/redis.module";
 import { env } from "../config/env.config";
-import { EventStatus } from "@tickethub/shared";
+import { EventStatus, OrderStatus, SeatStatus } from "@tickethub/shared";
+import { clearWaitingRoom, waitingRoomRedis } from "./waiting-room.redis";
+
 export interface WaitingRoomStatus {
-  status: "ADMITTED" | "QUEUED";
+  status: "ADMITTED" | "QUEUED" | "SOLD_OUT";
+  orderId?: string;
   admissionToken?: string;
   queuePosition?: number;
   estimatedWaitSeconds?: number;
@@ -104,11 +107,16 @@ export class WaitingRoomService {
     }
   }
 
-  async joinQueue(userId: string, eventId: string): Promise<WaitingRoomStatus> {
+  private async prepareEntry(
+    userId: string,
+    eventId: string,
+  ): Promise<{
+    event: typeof events.$inferSelect;
+    result: WaitingRoomStatus | undefined;
+  }> {
     const event = await db.query.events.findFirst({
       where: eq(events.id, eventId),
     });
-
     if (!event) {
       throw new NotFoundException({
         success: false,
@@ -120,15 +128,71 @@ export class WaitingRoomService {
       });
     }
 
-    // Nếu sự kiện không bật hàng chờ ảo, cấp token vào thẳng
-    if (!event.isWaitingRoomEnabled) {
-      const admissionToken = await this.generateAdmissionToken(userId, eventId);
+    // Don dang giu duoc uu tien, chi lay don cua chinh nguoi dang dang nhap.
+    const pending = await db.query.orders.findFirst({
+      where: and(
+        eq(orders.userId, userId),
+        eq(orders.eventId, eventId),
+        eq(orders.status, OrderStatus.PENDING),
+        gt(orders.expiresAt, new Date()),
+      ),
+      orderBy: [desc(orders.createdAt), desc(orders.id)],
+    });
+    if (pending) {
+      await waitingRoomRedis(() =>
+        this.redis.zrem(`waiting_room:${eventId}`, userId),
+      );
       return {
-        status: "ADMITTED",
-        admissionToken,
+        event,
+        result: {
+          status: "ADMITTED",
+          orderId: pending.id,
+        },
       };
     }
 
+    if (!event.isWaitingRoomEnabled) {
+      await clearWaitingRoom(this.redis, eventId);
+      const admissionToken = await this.generateAdmissionToken(userId, eventId);
+      return {
+        event,
+        result: { status: "ADMITTED", admissionToken },
+      };
+    }
+
+    // Ghe HELD chua phai ve da ban. Khong bao SOLD_OUT khi ve chi tam giu.
+    const [inventory] = await db.execute<{
+      remaining: boolean;
+    }>(sql`select exists (
+        select 1 from ${ticketTypes}
+        where ${ticketTypes.eventId} = ${eventId}
+        and (
+          (${ticketTypes.isSeated} = false and ${ticketTypes.soldCount} < ${ticketTypes.capacity})
+          or (${ticketTypes.isSeated} = true and exists (
+            select 1 from ${seats}
+            where ${seats.ticketTypeId} = ${ticketTypes.id}
+            and ${seats.status} in (${SeatStatus.AVAILABLE}, ${SeatStatus.HELD})
+          ))
+        )
+      ) as remaining`);
+    if (!inventory?.remaining) {
+      await clearWaitingRoom(this.redis, eventId);
+      return { event, result: { status: "SOLD_OUT" } };
+    }
+    return { event, result: undefined };
+  }
+
+  async joinQueue(userId: string, eventId: string): Promise<WaitingRoomStatus> {
+    const { event, result } = await this.prepareEntry(userId, eventId);
+    if (result) return result;
+    return waitingRoomRedis(() => this.joinRedis(userId, event));
+  }
+
+  private async joinRedis(
+    userId: string,
+    event: typeof events.$inferSelect,
+  ): Promise<WaitingRoomStatus> {
+    const eventId = event.id;
     const activeKey = `active_users:${eventId}`;
     const queueKey = `waiting_room:${eventId}`;
 
@@ -157,14 +221,6 @@ export class WaitingRoomService {
 
       // Phien cu het han: loai khoi active
       await this.redis.srem(activeKey, userId);
-    }
-
-    if (isAlreadyActive) {
-      const admissionToken = await this.generateAdmissionToken(userId, eventId);
-      return {
-        status: "ADMITTED",
-        admissionToken,
-      };
     }
 
     const [activeCount, queueLen] = await Promise.all([
@@ -210,26 +266,16 @@ export class WaitingRoomService {
   }
 
   async heartbeat(userId: string, eventId: string): Promise<WaitingRoomStatus> {
-    const event = await db.query.events.findFirst({
-      where: eq(events.id, eventId),
-    });
+    const { event, result } = await this.prepareEntry(userId, eventId);
+    if (result) return result;
+    return waitingRoomRedis(() => this.heartbeatRedis(userId, event));
+  }
 
-    if (!event) {
-      throw new NotFoundException({
-        success: false,
-        error: {
-          code: "EVENT_NOT_FOUND",
-          message: "Không tìm thấy sự kiện",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    if (!event.isWaitingRoomEnabled) {
-      const admissionToken = await this.generateAdmissionToken(userId, eventId);
-      return { status: "ADMITTED", admissionToken };
-    }
-
+  private async heartbeatRedis(
+    userId: string,
+    event: typeof events.$inferSelect,
+  ): Promise<WaitingRoomStatus> {
+    const eventId = event.id;
     const activeKey = `active_users:${eventId}`;
     const queueKey = `waiting_room:${eventId}`;
 
@@ -240,7 +286,7 @@ export class WaitingRoomService {
 
       if (!alive) {
         await this.redis.srem(activeKey, userId);
-        return this.joinQueue(userId, eventId);
+        return this.joinRedis(userId, event);
       }
 
       await this.touchHeartbeat(eventId, userId);
@@ -260,7 +306,7 @@ export class WaitingRoomService {
 
     if (rank === null) {
       // Chưa có trong hàng chờ, gọi joinQueue
-      return this.joinQueue(userId, eventId);
+      return this.joinRedis(userId, event);
     }
 
     const heartbeatAlive = await this.redis.exists(
@@ -269,7 +315,7 @@ export class WaitingRoomService {
 
     if (!heartbeatAlive) {
       await this.redis.zrem(queueKey, userId);
-      return this.joinQueue(userId, eventId);
+      return this.joinRedis(userId, event);
     }
 
     await this.touchHeartbeat(eventId, userId);
