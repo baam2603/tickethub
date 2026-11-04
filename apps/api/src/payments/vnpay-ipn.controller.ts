@@ -14,6 +14,7 @@ export function toVnpayResponse(decision: IpnDecision) {
   switch (decision) {
     case "APPLY_SUCCESS":
     case "RECORD_FAILURE":
+    case "REFUND_PENDING":
       return { RspCode: "00", Message: "Confirm Success" };
 
     case "ALREADY_PROCESSED":

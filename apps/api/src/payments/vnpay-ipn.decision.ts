@@ -7,6 +7,7 @@ export type IpnDecision =
   | "ALREADY_PROCESSED"
   | "APPLY_SUCCESS"
   | "RECORD_FAILURE"
+  | "REFUND_PENDING"
   | "MANUAL_REVIEW";
 
 export interface IpnDecisionInput {

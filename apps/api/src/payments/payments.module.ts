@@ -1,3 +1,5 @@
+import { VnpayApi } from "./vnpay-api";
+import { VnpayQueryService } from "./vnpay-query.service";
 import { Module } from "@nestjs/common";
 
 import { VnpayIpnPreviewController } from "./vnpay-ipn.preview.controller";
@@ -16,6 +18,12 @@ import { VnpayIpnService } from "./vnpay-ipn.service";
     VnpayIpnPreviewController,
     VnpayIpnController,
   ],
-  providers: [PaymentService, VnpayIpnPreviewService, VnpayIpnService],
+  providers: [
+    VnpayApi,
+    VnpayQueryService,
+    PaymentService,
+    VnpayIpnPreviewService,
+    VnpayIpnService,
+  ],
 })
 export class PaymentsModule {}

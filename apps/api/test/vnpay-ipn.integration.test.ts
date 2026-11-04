@@ -683,10 +683,8 @@ if (!isSafeTestDb) {
 
       assert.equal(second.transactionRef, fixture.transactionRef);
 
-      assert.deepEqual(generatedRefs, [
-        fixture.transactionRef,
-        fixture.transactionRef,
-      ]);
+      assert.deepEqual(generatedRefs, [fixture.transactionRef]);
+      assert.equal(first.paymentUrl, second.paymentUrl);
 
       // Kiem tra database chi co 1 transaction.
       const savedTransactions = await db
