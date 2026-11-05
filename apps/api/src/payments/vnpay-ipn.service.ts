@@ -27,6 +27,7 @@ import { toVnpayAmount } from "./vnpay-amount";
 import { decideVnpayIpn, type IpnDecision } from "./vnpay-ipn.decision";
 
 import { EventReadCacheService } from "../events/event-read-cache.service";
+import { SeatStreamService } from "../events/seat-stream.service";
 
 @Injectable()
 export class VnpayIpnService {
@@ -35,6 +36,9 @@ export class VnpayIpnService {
   constructor(
     @Inject(EventReadCacheService)
     private readonly eventReadCacheService: EventReadCacheService,
+
+    @Inject(SeatStreamService)
+    private readonly seatStreamService: SeatStreamService,
   ) {}
 
   async process(params: Record<string, string>): Promise<IpnDecision> {
@@ -361,6 +365,26 @@ export class VnpayIpnService {
 
       if (affectedOrder) {
         await this.eventReadCacheService.invalidate(affectedOrder.eventId);
+
+        const orderItemRows = await db
+          .select({ seatId: orderItems.seatId })
+          .from(orderItems)
+          .where(eq(orderItems.orderId, existing.orderId));
+
+        const seatIds = orderItemRows
+          .map((r) => r.seatId)
+          .filter((id): id is string => id !== null && id !== undefined);
+
+        if (seatIds.length > 0) {
+          await this.seatStreamService.publishSeatStatusChanged(
+            affectedOrder.eventId,
+            {
+              seatIds,
+              status: decision === "APPLY_SUCCESS" ? "SOLD" : "AVAILABLE",
+              expiresAt: null,
+            },
+          );
+        }
       }
     }
 

@@ -27,6 +27,7 @@ import {
 } from "@tickethub/shared";
 import { WaitingRoomService } from "../waiting-room/waiting-room.service";
 import { EventReadCacheService } from "../events/event-read-cache.service";
+import { SeatStreamService } from "../events/seat-stream.service";
 
 interface CandidateSeat {
   id: string;
@@ -104,6 +105,9 @@ export class BookingService {
 
     @Inject(EventReadCacheService)
     private readonly eventReadCacheService: EventReadCacheService,
+
+    @Inject(SeatStreamService)
+    private readonly seatStreamService: SeatStreamService,
   ) {}
 
   async holdSeats(
@@ -637,6 +641,14 @@ export class BookingService {
     // Chi xoa cache sau khi PostgreSQL commit thanh cong
     await this.eventReadCacheService.invalidate(dto.eventId);
 
+    if (result.heldSeats && result.heldSeats.length > 0) {
+      await this.seatStreamService.publishSeatStatusChanged(dto.eventId, {
+        seatIds: result.heldSeats,
+        status: "HELD",
+        expiresAt: result.holdExpiresAt,
+      });
+    }
+
     return result;
   }
 
@@ -740,6 +752,19 @@ export class BookingService {
     // Sau khi huy giu ve thanh cong
     await this.eventReadCacheService.invalidate(order.eventId);
 
+    if (order.items && order.items.length > 0) {
+      const seatIds = order.items
+        .map((item) => item.seatId)
+        .filter((id): id is string => id !== null && id !== undefined);
+      if (seatIds.length > 0) {
+        await this.seatStreamService.publishSeatStatusChanged(order.eventId, {
+          seatIds,
+          status: "AVAILABLE",
+          expiresAt: null,
+        });
+      }
+    }
+
     return result;
   }
 
@@ -814,7 +839,7 @@ export class BookingService {
       );
       if (expiredOrders.length === 0) {
         // Vẫn dọn các ghế rác nếu có trạng thái HELD mà quá hạn
-        await tx
+        const releasedSeatRecords = await tx
           .update(seats)
           .set({
             status: SeatStatus.AVAILABLE,
@@ -828,10 +853,12 @@ export class BookingService {
               eq(seats.status, SeatStatus.HELD),
               lt(seats.holdExpiresAt, now),
             ),
-          );
+          )
+          .returning({ id: seats.id, eventId: seats.eventId });
         return {
           expiredOrdersCount: 0,
           affectedEventIds,
+          releasedSeatRecords,
         };
       }
 
@@ -844,7 +871,7 @@ export class BookingService {
         .where(inArray(orders.id, expiredOrderIds));
 
       // Giải phóng ghế thuộc các đơn hết hạn
-      await tx
+      const releasedSeatRecords = await tx
         .update(seats)
         .set({
           status: SeatStatus.AVAILABLE,
@@ -861,7 +888,8 @@ export class BookingService {
               lt(seats.holdExpiresAt, now),
             ),
           ),
-        );
+        )
+        .returning({ id: seats.id, eventId: seats.eventId });
 
       // Hoàn trả held_count cho vé đứng thuộc các đơn hết hạn
       const standingOrderItems = await tx
@@ -890,6 +918,7 @@ export class BookingService {
       return {
         expiredOrdersCount: expiredOrderIds.length,
         affectedEventIds,
+        releasedSeatRecords,
       };
     });
     await Promise.all(
@@ -897,6 +926,22 @@ export class BookingService {
         this.eventReadCacheService.invalidate(eventId),
       ),
     );
+
+    if (result.releasedSeatRecords && result.releasedSeatRecords.length > 0) {
+      const seatsByEvent = new Map<string, string[]>();
+      for (const s of result.releasedSeatRecords) {
+        const list = seatsByEvent.get(s.eventId) || [];
+        list.push(s.id);
+        seatsByEvent.set(s.eventId, list);
+      }
+      for (const [eventId, seatIds] of seatsByEvent.entries()) {
+        await this.seatStreamService.publishSeatStatusChanged(eventId, {
+          seatIds,
+          status: "AVAILABLE",
+          expiresAt: null,
+        });
+      }
+    }
 
     return {
       expiredOrdersCount: result.expiredOrdersCount,

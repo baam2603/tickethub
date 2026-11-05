@@ -41,6 +41,7 @@ import {
   type TicketToRefund,
 } from "./refund-calculator";
 import { EventReadCacheService } from "../events/event-read-cache.service";
+import { SeatStreamService } from "../events/seat-stream.service";
 
 @Injectable()
 export class RefundsService {
@@ -48,6 +49,10 @@ export class RefundsService {
     @Optional()
     @Inject(EventReadCacheService)
     private readonly eventReadCacheService?: EventReadCacheService,
+
+    @Optional()
+    @Inject(SeatStreamService)
+    private readonly seatStreamService?: SeatStreamService,
   ) {}
 
   /**
@@ -437,6 +442,30 @@ export class RefundsService {
         .limit(1);
       if (order?.eventId) {
         await this.eventReadCacheService.invalidate(order.eventId);
+      }
+    }
+
+    // Phát sự kiện cập nhật trạng thái ghế thời gian thực qua Redis Pub/Sub
+    if (this.seatStreamService) {
+      const seatRows = await db
+        .select({ seatId: tickets.seatId, eventId: tickets.eventId })
+        .from(tickets)
+        .where(inArray(tickets.id, dto.ticketIds));
+
+      const seatsByEvent = new Map<string, string[]>();
+      for (const r of seatRows) {
+        if (r.seatId && r.eventId) {
+          const list = seatsByEvent.get(r.eventId) || [];
+          list.push(r.seatId);
+          seatsByEvent.set(r.eventId, list);
+        }
+      }
+      for (const [eventId, seatIds] of seatsByEvent.entries()) {
+        await this.seatStreamService.publishSeatStatusChanged(eventId, {
+          seatIds,
+          status: "AVAILABLE",
+          expiresAt: null,
+        });
       }
     }
 
