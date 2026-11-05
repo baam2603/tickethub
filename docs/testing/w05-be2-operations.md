@@ -12,7 +12,7 @@ pnpm --filter @tickethub/api build
 pnpm --filter @tickethub/api start
 ```
 
-API soát vé dùng khóa Ed25519 hợp lệ qua ED25519_PRIVATE_KEY dạng base64 PKCS8 DER. Giá trị dummy trong cấu hình mẫu/CI cũ không phải khóa sử dụng được. Dùng khóa riêng dành cho test khi chạy test; không tự sinh khóa thay thế âm thầm trong production.
+API soát vé dùng khóa Ed25519 hợp lệ qua ED25519_PRIVATE_KEY dạng base64 PKCS8 DER. Đã xác minh giá trị mẫu hiện có trong CI vẫn đọc được và ký/xác minh QR thành công. Đây là khóa cố định đã công khai trong repository, chỉ dùng cho kiểm thử; staging/production phải có khóa riêng. Không tự sinh khóa thay thế âm thầm trong production.
 
 ## Worker báo cáo
 
