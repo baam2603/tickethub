@@ -8,12 +8,16 @@ import { firstValueFrom } from "rxjs";
 describe("SeatStreamService Unit Tests", () => {
   let mockPublisher: Partial<Redis>;
   let mockSubscriber: {
-    subscribe: (...args: any[]) => Promise<any>;
-    unsubscribe: (...args: any[]) => Promise<any>;
-    on: (event: string, handler: (...args: any[]) => void) => any;
-    duplicate: () => any;
+    subscribe: (...args: string[]) => Promise<number>;
+    unsubscribe: (...args: string[]) => Promise<number>;
+    on: (
+      event: string,
+      handler: (channel: string, message: string) => void,
+    ) => unknown;
+    duplicate: () => unknown;
   };
-  let messageHandler: ((channel: string, message: string) => void) | null = null;
+  let messageHandler: ((channel: string, message: string) => void) | null =
+    null;
   let service: SeatStreamService;
 
   beforeEach(() => {
@@ -21,7 +25,10 @@ describe("SeatStreamService Unit Tests", () => {
     mockSubscriber = {
       subscribe: async () => 1,
       unsubscribe: async () => 1,
-      on: (event: string, handler: any) => {
+      on: (
+        event: string,
+        handler: (channel: string, message: string) => void,
+      ) => {
         if (event === "message") {
           messageHandler = handler;
         }
@@ -95,7 +102,11 @@ describe("SeatStreamService Unit Tests", () => {
     const stream2$ = service.createSeatStream("event-123");
     const sub2 = stream2$.subscribe();
 
-    assert.equal(subscribedChannels.length, 1, "Should not call subscribe again");
+    assert.equal(
+      subscribedChannels.length,
+      1,
+      "Should not call subscribe again",
+    );
     assert.equal(service.getChannelRefCount("event-123"), 2);
 
     sub1.unsubscribe();

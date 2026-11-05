@@ -87,7 +87,10 @@ export class SeatStreamService implements OnApplicationShutdown {
       };
       this.channels.set(channel, subInfo);
       this.subscriberClient.subscribe(channel).catch((err) => {
-        this.logger.error(`Failed to subscribe to Redis channel ${channel}`, err);
+        this.logger.error(
+          `Failed to subscribe to Redis channel ${channel}`,
+          err,
+        );
       });
     }
 
@@ -183,7 +186,7 @@ export class SeatStreamService implements OnApplicationShutdown {
 
   async onApplicationShutdown(): Promise<void> {
     try {
-      for (const [channel, sub] of this.channels.entries()) {
+      for (const [_channel, sub] of this.channels.entries()) {
         sub.subject.complete();
       }
       this.channels.clear();

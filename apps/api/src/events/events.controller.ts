@@ -180,6 +180,7 @@ export class PublicEventsController {
 
   // GET /api/v1/events/:id/seats/stream
   // Luong Server-Sent Events cap nhat trang thai ghe thoi gian thuc
+  @Get(":id/seats/stream")
   @Sse(":id/seats/stream")
   streamSeats(
     @Param("id", ParseUUIDPipe) id: string,

@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { SeatStreamService } from "../src/events/seat-stream.service";
 import type { SeatStreamMessageEvent } from "../src/events/seat-stream.service";
 import type Redis from "ioredis";
-import { take, toArray } from "rxjs/operators";
-import { firstValueFrom } from "rxjs";
 
 describe("E2E Integration Simulation: Realtime Seat Stream (SSE & Redis Pub/Sub)", () => {
   it("should broadcast seat status change events across multiple subscribers and clean up on teardown", async () => {
     // Simulated in-memory Redis message bus
-    const redisBus = new Map<string, ((channel: string, message: string) => void)[]>();
+    const redisBus = new Map<
+      string,
+      ((channel: string, message: string) => void)[]
+    >();
     const activeSubscriptions = new Set<string>();
 
     const mockPublisher = {
@@ -32,7 +33,10 @@ describe("E2E Integration Simulation: Realtime Seat Stream (SSE & Redis Pub/Sub)
         activeSubscriptions.delete(channel);
         return 1;
       },
-      on: (event: string, handler: any) => {
+      on: (
+        event: string,
+        handler: (channel: string, message: string) => void,
+      ) => {
         if (event === "message") {
           subListener = handler;
         }
@@ -44,7 +48,6 @@ describe("E2E Integration Simulation: Realtime Seat Stream (SSE & Redis Pub/Sub)
     const service = new SeatStreamService(mockPublisher, mockSubscriber);
 
     // Register bus router
-    const originalPublish = mockPublisher.publish;
     mockPublisher.publish = async (channel: string, message: string) => {
       if (activeSubscriptions.has(channel) && subListener) {
         subListener(channel, message);

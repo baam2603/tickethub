@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { PublicEventsController } from "../src/events/events.controller";
-import type { SeatStreamService, SeatStatusChangedPayload } from "../src/events/seat-stream.service";
+import type {
+  SeatStreamService,
+  SeatStatusChangedPayload,
+} from "../src/events/seat-stream.service";
 import type { EventsService } from "../src/events/events.service";
 import type { EventReadCacheService } from "../src/events/event-read-cache.service";
 import { of, firstValueFrom } from "rxjs";

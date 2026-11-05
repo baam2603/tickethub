@@ -1,12 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { SeatStreamService, SeatStatusChangedPayload } from "../src/events/seat-stream.service";
+import type {
+  SeatStreamService,
+  SeatStatusChangedPayload,
+} from "../src/events/seat-stream.service";
 
 describe("Seat Status Publisher Hooks Tests", () => {
   it("should verify publisher payload format for HELD status", async () => {
-    const published: { eventId: string; payload: SeatStatusChangedPayload }[] = [];
+    const published: { eventId: string; payload: SeatStatusChangedPayload }[] =
+      [];
     const mockSeatStreamService: Partial<SeatStreamService> = {
-      publishSeatStatusChanged: async (eventId: string, payload: SeatStatusChangedPayload) => {
+      publishSeatStatusChanged: async (
+        eventId: string,
+        payload: SeatStatusChangedPayload,
+      ) => {
         published.push({ eventId, payload });
       },
     };
@@ -26,9 +33,13 @@ describe("Seat Status Publisher Hooks Tests", () => {
   });
 
   it("should verify publisher payload format for AVAILABLE status (release/refund/cleanup)", async () => {
-    const published: { eventId: string; payload: SeatStatusChangedPayload }[] = [];
+    const published: { eventId: string; payload: SeatStatusChangedPayload }[] =
+      [];
     const mockSeatStreamService: Partial<SeatStreamService> = {
-      publishSeatStatusChanged: async (eventId: string, payload: SeatStatusChangedPayload) => {
+      publishSeatStatusChanged: async (
+        eventId: string,
+        payload: SeatStatusChangedPayload,
+      ) => {
         published.push({ eventId, payload });
       },
     };
@@ -46,9 +57,13 @@ describe("Seat Status Publisher Hooks Tests", () => {
   });
 
   it("should verify publisher payload format for SOLD status (payment IPN)", async () => {
-    const published: { eventId: string; payload: SeatStatusChangedPayload }[] = [];
+    const published: { eventId: string; payload: SeatStatusChangedPayload }[] =
+      [];
     const mockSeatStreamService: Partial<SeatStreamService> = {
-      publishSeatStatusChanged: async (eventId: string, payload: SeatStatusChangedPayload) => {
+      publishSeatStatusChanged: async (
+        eventId: string,
+        payload: SeatStatusChangedPayload,
+      ) => {
         published.push({ eventId, payload });
       },
     };
