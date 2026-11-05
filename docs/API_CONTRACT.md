@@ -608,7 +608,7 @@ Webhook tiếp nhận thông báo kết quả từ cổng VNPay.
   - Sai chữ ký: `{"RspCode": "97", "Message": "Invalid Signature"}`
   - Không tìm thấy đơn: `{"RspCode": "01", "Message": "Order not found"}`
 
-### [PLANNED] Vé điện tử và soát vé (`/tickets` và `/checkin`)
+### Vé điện tử và soát vé (`/tickets` và `/gate`)
 
 #### [PLANNED] `GET /api/v1/tickets/my-tickets`
 
@@ -617,80 +617,137 @@ Lấy danh sách vé đã mua của người dùng đăng nhập.
 - Header: `Authorization: Bearer <accessToken>`
 - Response 200: Danh sách vé kèm thông tin sự kiện, vị trí ghế và trạng thái.
 
-#### [PLANNED] `GET /api/v1/tickets/:id/dynamic-qr`
+#### `GET /api/v1/tickets/:id/qr`
 
-Lấy token mã QR động ký số bằng Ed25519 (hiệu lực 30 giây).
+Lấy mã QR động JWT ký số bằng thuật toán Ed25519 (chu kỳ làm mới 30 giây).
 
+- Quyền: `BUYER` (chủ sở hữu vé) hoặc `ADMIN`
 - Header: `Authorization: Bearer <accessToken>`
-- Điều kiện: Vé ở trạng thái `SOLD`, đúng chủ sở hữu và nằm trong khung giờ quy định (từ 2 giờ trước giờ mở cổng đến hết sự kiện).
-- Response 200:
+- Path param: `id` (UUID của vé)
+- Điều kiện: Vé ở trạng thái `SOLD` và sự kiện đang ở trạng thái `PUBLISHED`.
+- Response: `200 OK`
 
 ```json
 {
-  "success": true,
-  "data": {
-    "ticketId": "tkt-uuid",
-    "qrToken": "eyJhbGciOiJFZERTQSI...",
-    "issuedAt": "2026-11-20T17:30:00Z",
-    "expiresAt": "2026-11-20T17:30:30Z",
-    "refreshIntervalSeconds": 25
-  }
+  "ticketId": "3fd0bca3-cea0-4eff-b8aa-76329dfd0e4f",
+  "qrToken": "eyJhbGciOiJFZERTQSI...",
+  "expiresAt": "2026-11-20T17:30:30.000Z",
+  "remainingSeconds": 30
 }
 ```
 
-Nội dung giải mã của `qrToken` (Ed25519 JWS):
+Nội dung giải mã của `qrToken` (Ed25519 JWS Payload):
 
 ```json
 {
-  "sub": "tkt-uuid",
-  "eventId": "e1-uuid",
-  "ticketCode": "TKT-XYZ789",
-  "seat": "Khu VIP A - Hàng A - Ghế 01",
+  "sub": "3fd0bca3-cea0-4eff-b8aa-76329dfd0e4f",
+  "eventId": "071bb3bc-3264-4e42-afb2-20a91282a182",
+  "orderId": "3aff9a01-7078-4e84-9e4f-4857ca03c932",
+  "userId": "165a34d9-64d9-42c7-a9a1-e8034a632f16",
   "iat": 1795195800,
   "exp": 1795195830,
-  "jti": "random_unique_nonce_string"
+  "nonce": "a7b3c2d1-e4f5-6a7b-8c9d-0e1f2a3b4c5d"
 }
 ```
 
-#### [PLANNED] `POST /api/v1/checkin/scan`
+#### `POST /api/v1/gate/scan`
 
-Nhân viên soát vé quét mã QR tại cổng.
+Nhân viên soát vé quét mã QR động tại cổng vào sự kiện. Thực hiện cập nhật trạng thái vé nguyên tử (`SOLD` -> `CHECKED_IN`).
 
+- Quyền: `GATE_STAFF` (được phân công cho sự kiện trong `event_staff`) hoặc `ADMIN`
 - Header: `Authorization: Bearer <staffToken>`
-- Request body: `{ "qrToken": "string", "gateId": "gate-a-uuid" }`
-- Response 200 (vé hợp lệ):
+- Request body:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "status": "VALID",
-    "ticketCode": "TKT-XYZ789",
-    "seat": "Khu VIP A - Hàng A - Ghế 01",
-    "ticketTypeName": "VIP",
-    "checkedInAt": "2026-11-20T18:15:22Z"
-  }
+  "qrToken": "eyJhbGciOiJFZERTQSI...",
+  "gateId": "7b82fe51-4029-4d2c-9a3b-285b001a1d12"
 }
 ```
 
-- Response 409 (vé đã sử dụng hoặc đã hủy):
+- Response: `200 OK` (soát vé thành công)
 
 ```json
 {
-  "success": false,
-  "error": {
-    "code": "TICKET_ALREADY_USED",
-    "message": "Vé này đã được soát lúc 18:02:11 tại Cổng B"
-  }
+  "ticketId": "3fd0bca3-cea0-4eff-b8aa-76329dfd0e4f",
+  "ticketCode": "TK1_c5837da3336143918702fc862f87",
+  "status": "CHECKED_IN",
+  "eventTitle": "Đại Nhạc Hội Mùa Hè 2026",
+  "ticketTypeName": "VIP Diamond",
+  "zoneName": "Khu VIP Diamond",
+  "seatLabel": "Hàng A - Ghế 01",
+  "isSeated": true,
+  "buyerName": "Nguyễn Văn Mua",
+  "checkedInAt": "2026-11-20T18:15:22.000Z",
+  "gateId": "7b82fe51-4029-4d2c-9a3b-285b001a1d12",
+  "staffId": "9a8b7c6d-5e4f-3a2b-1c0d-e9f8a7b6c5d4"
 }
 ```
 
-#### [PLANNED] `POST /api/v1/checkin/manual-search`
+- Response: `409 Conflict` (vé đã được sử dụng trước đó):
 
-Tra cứu vé thủ công khi người mua không mở được mã QR.
+```json
+{
+  "statusCode": 409,
+  "message": "TICKET_ALREADY_USED: Ticket was already checked in at 2026-11-20T18:02:11.000Z by staff 9a8b7c6d-5e4f-3a2b-1c0d-e9f8a7b6c5d4"
+}
+```
 
-- Request body: `{ "eventId": "e1-uuid", "searchQuery": "0912345678" }`
-- Response 200: Danh sách vé phù hợp để nhân viên đối chiếu giấy tờ tùy thân.
+- Response: `403 Forbidden` (nhân viên không được phân công cho sự kiện):
+
+```json
+{
+  "statusCode": 403,
+  "message": "STAFF_NOT_ASSIGNED_TO_EVENT: Gate staff is not assigned to this event"
+}
+```
+
+#### `POST /api/v1/gate/lookup`
+
+Tra cứu thủ công vé dự phòng bằng mã vé tĩnh 32 ký tự kết hợp 4 chữ số cuối của Số điện thoại hoặc Email khi khách gặp sự cố thiết bị (hết pin, vỡ màn hình, mất mạng). Bắt buộc ghi nhận nhật ký kiểm toán bất biến vào `audit_log`.
+
+- Quyền: `GATE_STAFF` (được phân công cho sự kiện) hoặc `ADMIN`
+- Header: `Authorization: Bearer <staffToken>`
+- Request body:
+
+```json
+{
+  "eventId": "071bb3bc-3264-4e42-afb2-20a91282a182",
+  "ticketCode": "LK6_a7b3c2d1e4f56a7b8c9d0e1f2a3b",
+  "phoneOrEmailLast4": "4567",
+  "reason": "Khách hết pin điện thoại tại cổng",
+  "gateId": "7b82fe51-4029-4d2c-9a3b-285b001a1d12"
+}
+```
+
+- Response: `200 OK`
+
+```json
+{
+  "ticketId": "3fd0bca3-cea0-4eff-b8aa-76329dfd0e4f",
+  "ticketCode": "LK6_a7b3c2d1e4f56a7b8c9d0e1f2a3b",
+  "status": "CHECKED_IN",
+  "eventTitle": "Đại Nhạc Hội Mùa Hè 2026",
+  "ticketTypeName": "VIP Diamond",
+  "zoneName": "Khu VIP Diamond",
+  "seatLabel": "Hàng A - Ghế 01",
+  "isSeated": true,
+  "buyerName": "Nguyễn Văn Mua",
+  "checkedInAt": "2026-11-20T18:18:00.000Z",
+  "gateId": "7b82fe51-4029-4d2c-9a3b-285b001a1d12",
+  "staffId": "9a8b7c6d-5e4f-3a2b-1c0d-e9f8a7b6c5d4",
+  "method": "MANUAL_LOOKUP"
+}
+```
+
+- Response: `400 Bad Request` (xác minh 4 số cuối thất bại):
+
+```json
+{
+  "statusCode": 400,
+  "message": "VERIFICATION_FAILED: Last 4 digits of phone or email do not match attendee record"
+}
+```
 
 ### [PLANNED] Hủy vé và hoàn tiền (`/refund`)
 
