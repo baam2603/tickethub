@@ -14,4 +14,3 @@ import { EventsModule } from "../events/events.module";
   exports: [BookingService, BuyerOrderService],
 })
 export class BookingModule {}
-

@@ -176,7 +176,8 @@ export class BuyerOrderService {
     }));
 
     const isPaidOrRefunded =
-      order.status === OrderStatus.PAID || order.status === OrderStatus.REFUNDED;
+      order.status === OrderStatus.PAID ||
+      order.status === OrderStatus.REFUNDED;
 
     let ticketList: BuyerOrderDetailTicketItem[] = [];
     if (isPaidOrRefunded && order.tickets && order.tickets.length > 0) {

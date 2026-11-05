@@ -61,4 +61,3 @@ export class TicketsController {
     return this.ticketsService.getTicketQr(user.userId, user.role, id);
   }
 }
-

@@ -1,7 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { Reflector } from "@nestjs/core";
 import {
   BadRequestException,
@@ -154,7 +154,6 @@ describe("Buyer Orders & Personal Tickets E2E Integration Suite", () => {
         representativeName: "Nguyen Dai Dien",
       })
       .returning();
-
 
     // 2. Create Events (Seated Event starts earlier, GA Event starts later)
     seatedEventId = randomUUID();
@@ -448,7 +447,7 @@ describe("Buyer Orders & Personal Tickets E2E Integration Suite", () => {
 
   function createMockContext(
     user: { id: string; role: UserRole },
-    handler: Function,
+    handler: (...args: unknown[]) => unknown,
   ): ExecutionContext {
     const req = {
       user: {
