@@ -3,6 +3,8 @@ import { before, after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { JwtService } from "@nestjs/jwt";
@@ -49,10 +51,16 @@ import { RolesGuard } from "../src/auth/guards/roles.guard";
 class W05Module {}
 describe("W05 BE2: staff, manual checkin, materialized reports va export", () => {
   const redis = new Redis(env.REDIS_URL, {
+    lazyConnect: true,
+    retryStrategy: () => null,
+    connectTimeout: 3000,
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
     commandTimeout: 500,
   });
+  // Ket noi chi bat dau trong before; loi connect duoc bao qua promise.
+  redis.on("error", () => {});
+  const previousExportDir = process.env.REPORT_EXPORT_DIR;
   const jwt = new JwtService({ secret: env.JWT_SECRET });
   const userIds: string[] = [];
   const eventIds: string[] = [];
@@ -68,7 +76,7 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
   let staffId: string;
   let app: NestFastifyApplication;
   let base: string;
-  let dir: string;
+  let dir: string | undefined;
   let crypto: Ed25519Service;
   async function request(
     path: string,
@@ -168,10 +176,9 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
       .privateKey.export({ format: "der", type: "pkcs8" })
       .toString("base64");
     crypto = new Ed25519Service();
-    dir = await mkdtemp("/tmp/w05-exports-");
+    dir = await mkdtemp(join(tmpdir(), "w05-exports-"));
     process.env.REPORT_EXPORT_DIR = dir;
-    if (redis.status !== "ready")
-      await new Promise<void>((resolve) => redis.once("ready", resolve));
+    await redis.connect();
     const created = await db
       .insert(users)
       .values(
@@ -234,29 +241,49 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
     base = await app.getUrl();
   });
   after(async () => {
-    await app?.close();
-    redis.disconnect();
-    if (eventIds.length) {
-      await db
-        .delete(reportExports)
-        .where(inArray(reportExports.eventId, eventIds));
-      await db.delete(refunds).where(inArray(refunds.orderId, orderIds));
-      await db.delete(tickets).where(inArray(tickets.eventId, eventIds));
-      await db.delete(orderItems).where(inArray(orderItems.orderId, orderIds));
-      await db.delete(orders).where(inArray(orders.id, orderIds));
-      await db.delete(eventStaff).where(inArray(eventStaff.eventId, eventIds));
-      await db.delete(gates).where(inArray(gates.eventId, eventIds));
-      await db.delete(events).where(inArray(events.id, eventIds));
-      await db
-        .delete(organizerStaff)
-        .where(inArray(organizerStaff.userId, userIds));
-      await db
-        .delete(organizerProfiles)
-        .where(inArray(organizerProfiles.userId, userIds));
-      await db.delete(users).where(inArray(users.id, userIds));
+    try {
+      await app?.close();
+      if (eventIds.length) {
+        await db
+          .delete(reportExports)
+          .where(inArray(reportExports.eventId, eventIds));
+        await db.delete(refunds).where(inArray(refunds.orderId, orderIds));
+        await db.delete(tickets).where(inArray(tickets.eventId, eventIds));
+        await db
+          .delete(orderItems)
+          .where(inArray(orderItems.orderId, orderIds));
+        await db.delete(orders).where(inArray(orders.id, orderIds));
+        await db
+          .delete(eventStaff)
+          .where(inArray(eventStaff.eventId, eventIds));
+        await db.delete(gates).where(inArray(gates.eventId, eventIds));
+        await db.delete(events).where(inArray(events.id, eventIds));
+      }
+      if (userIds.length) {
+        await db
+          .delete(organizerStaff)
+          .where(inArray(organizerStaff.userId, userIds));
+        await db
+          .delete(organizerProfiles)
+          .where(inArray(organizerProfiles.userId, userIds));
+        await db.delete(users).where(inArray(users.id, userIds));
+      }
+    } finally {
+      redis.disconnect();
+      if (previousExportDir === undefined) delete process.env.REPORT_EXPORT_DIR;
+      else process.env.REPORT_EXPORT_DIR = previousExportDir;
+      try {
+        if (dir)
+          await rm(dir, {
+            recursive: true,
+            force: true,
+            maxRetries: 3,
+            retryDelay: 100,
+          });
+      } finally {
+        await sqlClient.end();
+      }
     }
-    await rm(dir, { recursive: true, force: true });
-    await sqlClient.end();
   });
   it("BTC tao staff an toan, khong lo password; khong cho sua role hay email trung", async () => {
     const body = {

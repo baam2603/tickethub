@@ -49,3 +49,17 @@ pnpm build
 ```
 
 Log check-in không sửa/xóa, kể cả khi dọn fixture. Chúng dùng ID lịch sử không có FK tới fixture nên không cản dọn dữ liệu nghiệp vụ trong database test cô lập. Kiểm thử lỗi log dùng trigger tạm riêng trong database test, luôn gỡ trong finally.
+
+## PowerShell / Windows
+
+Bộ test dùng node:os tmpdir() và node:path join() để tạo thư mục trong TEMP/TMP của hệ điều hành. Redis chỉ kết nối trong before; teardown vẫn đóng kết nối và dọn fixture nếu setup thất bại. Nếu lỗi before, các ca cancelled chưa được thực thi và không được tính là lỗi nghiệp vụ.
+
+Sau khi migrate/seed thành công và DATABASE_URL đã được đặt đúng trong cùng terminal:
+
+```powershell
+git switch feat/w05-be2-staff-reporting
+git pull --ff-only
+pnpm.cmd --filter @tickethub/api exec tsx --test test/w05-operations.integration.test.ts
+```
+
+Giữ NODE_ENV=test, database riêng có hậu tố _test và Redis database riêng. Không cần bật dev backend cho bộ test này.

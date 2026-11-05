@@ -54,4 +54,10 @@ Các test chạy trên database PostgreSQL riêng có hậu tố _test và Redis
 
 Chưa chạy E2E trình duyệt hoặc kiểm thử tải dữ liệu lớn. Build web còn bị chặn ở Google Fonts nên không kết luận toàn bộ cổng CI/PR đã xanh. Kết quả trên là kiểm thử cục bộ, không thay thế trạng thái GitHub Actions trên PR.
 
-Không thay đổi logic nghiệp vụ trong đợt kiểm thử này; chỉ cập nhật báo cáo và đính chính tài liệu cấu hình khóa QR.
+Không thay đổi logic nghiệp vụ trong đợt kiểm thử này. Đã đính chính tài liệu khóa QR và sửa khởi tạo/dọn fixture kiểm thử để hỗ trợ Windows.
+
+## Bổ sung từ log Windows
+
+Log người dùng cho thấy hook before thất bại do mkdtemp('/tmp/...') không tồn tại trên Windows. Cả 13 ca bị cancelled, chưa chạy kiểm tra nghiệp vụ. Cảnh báo Redis xuất hiện khi dọn một kết nối đang bắt tay sau khi setup lỗi.
+
+Đã đổi sang tmpdir()/join(), dùng lazyConnect và await connect trong hook, xử lý lỗi kết nối qua promise, bảo đảm đóng kết nối và chỉ dọn thư mục đã được tạo. Đã chạy lại 13/13 ca thành công với TMPDIR tùy chỉnh có khoảng trắng trên môi trường Linux; chưa có runner Windows để xác nhận trực tiếp. Cần người dùng pull bản sửa và chạy lại PowerShell để xác nhận trên máy Windows.
