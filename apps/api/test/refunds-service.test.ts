@@ -29,8 +29,10 @@ describe("RefundsService Integration Tests", () => {
     const [userB] = await db.select().from(users).offset(1).limit(1);
     if (!userA || !userB) throw new Error("Need 2 users in db");
 
+    const [tt] = await db.select().from(ticketTypes).limit(1);
+    if (!tt) throw new Error("Need at least 1 ticket type in db");
+    const eventId = tt.eventId;
     const orderId = randomUUID();
-    const eventId = "e742fd19-f438-4ae8-9f75-f8d9ca26433b";
 
     await db.insert(orders).values({
       id: orderId,
@@ -44,11 +46,6 @@ describe("RefundsService Integration Tests", () => {
     });
 
     const ticketId = randomUUID();
-    const [tt] = await db
-      .select()
-      .from(ticketTypes)
-      .where(eq(ticketTypes.eventId, eventId))
-      .limit(1);
 
     await db.insert(tickets).values({
       id: ticketId,
@@ -81,12 +78,10 @@ describe("RefundsService Integration Tests", () => {
 
   it("successfully previews and executes partial refund, freeing the seat", async () => {
     const [user] = await db.select().from(users).limit(1);
-    const eventId = "e742fd19-f438-4ae8-9f75-f8d9ca26433b";
-    const [tt] = await db
-      .select()
-      .from(ticketTypes)
-      .where(eq(ticketTypes.eventId, eventId))
-      .limit(1);
+    if (!user) throw new Error("Need at least 1 user in db");
+    const [tt] = await db.select().from(ticketTypes).limit(1);
+    if (!tt) throw new Error("Need at least 1 ticket type in db");
+    const eventId = tt.eventId;
 
     // Create 2 seats
     const seat1Id = randomUUID();
