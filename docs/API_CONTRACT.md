@@ -1307,3 +1307,81 @@ Kiểm tra kết nối tới cơ sở dữ liệu PostgreSQL và máy chủ Redi
     }
   }
   ```
+
+## Tuần 5 BE2: Nhân viên, lịch sử soát vé và báo cáo UC09
+
+Các API `/organizer` bên dưới yêu cầu JWT của ORGANIZER đang ACTIVE và hồ sơ VERIFIED. Mọi tài nguyên được kiểm tra theo BTC sở hữu; truy cập tài nguyên của BTC khác trả 404. Không lấy organizerId từ body.
+
+### Quản lý nhân viên
+
+#### `POST /api/v1/organizer/staff`
+
+Body: `{ "email": "staff@example.com", "fullName": "Nhân viên A", "password": "<tối thiểu 12 ký tự>", "phone": "0901234567" }`. Tạo tài khoản GATE_STAFF ACTIVE thuộc BTC. Response 201 gồm id, email, fullName, phone, status, createdAt; không trả mật khẩu/hash. Email trùng trả 409. Role không được truyền bởi client.
+
+#### `GET /api/v1/organizer/staff`
+
+Query `page` mặc định 1, `limit` mặc định 20, tối đa 100. Response 200: `{ "success": true, "data": [ ... ] }`, chỉ gồm nhân viên thuộc BTC hiện tại.
+
+#### `PATCH /api/v1/organizer/staff/:staffId`
+
+Body gồm các trường muốn sửa: fullName, phone, status (ACTIVE hoặc LOCKED). Không sửa role/email qua API này. Response 200 là thông tin nhân viên sau cập nhật. Khóa nhân viên khiến JWT cũ không còn dùng để soát vé được; giữ lịch sử soát vé.
+
+#### `POST /api/v1/organizer/events/:eventId/gates`
+
+Body: `{ "name": "Cổng A", "locationDesc": "Sảnh chính" }`. Response 201 là cổng mới của sự kiện thuộc BTC.
+
+#### `GET /api/v1/organizer/events/:eventId/gates`
+
+Response 200: danh sách cổng của sự kiện, tối đa 100 cổng.
+
+#### `POST /api/v1/organizer/events/:eventId/staff`
+
+Body: `{ "userId": "staff-uuid", "gateId": "gate-uuid" }`. Chỉ gán nhân viên ACTIVE do BTC quản lý vào cổng thuộc đúng sự kiện của BTC. Response 201 là phân công. Gọi lại cập nhật cổng của phân công hiện có, không tạo dòng trùng.
+
+#### `GET /api/v1/organizer/events/:eventId/staff`
+
+Response 200: phân công nhân viên trong sự kiện, tối đa 100 dòng; không trả passwordHash.
+
+#### `DELETE /api/v1/organizer/events/:eventId/staff/:staffId`
+
+Gỡ phân công, không xóa tài khoản hay lịch sử. Response 200: `{ "success": true, "data": { "removed": true } }`. Yêu cầu soát vé tiếp theo của nhân viên phải bị từ chối.
+
+### Bổ sung hợp đồng soát vé
+
+`POST /api/v1/gate/lookup` hỗ trợ hai cách đối chiếu:
+
+- `ticketCode` + `phoneOrEmailLast4` chứa 4 số cuối SĐT (giữ tên trường cũ để tương thích).
+- `ticketCode` + `email` đầy đủ, đối chiếu không phân biệt hoa/thường. Không chấp nhận 4 ký tự cuối email vì không đủ để xác minh.
+
+Vẫn cần eventId và reason không rỗng. gateId có thể bỏ qua nếu nhân viên đã được gán cổng; nếu truyền thì phải đúng cổng được phân công. Check-in phải xác định được cổng thực tế. Admin cần chỉ định cổng khi không có phân công. Trả nguyên GateLookupResponse như hợp đồng cũ, không bọc thêm data.
+
+Cả QR và thủ công cùng kiểm tra tài khoản ACTIVE, phân công sự kiện/cổng và trạng thái PUBLISHED. QR còn phải khớp ticketId, eventId, orderId, userId với vé thật. Cập nhật CHECKED_IN, ghi gate_checkin_logs SUCCESS và audit_log cùng một transaction; lỗi ghi log phải rollback check-in. Lần thử bị từ chối được ghi REJECTED riêng sau rollback. Không ghi email/SĐT đối chiếu hoặc QR token vào log.
+
+#### `GET /api/v1/organizer/events/:eventId/checkins`
+
+Query page/limit như danh sách staff. Response 200 gồm các log của sự kiện: id, eventId, ticketId, gateId, staffId, method (QR/MANUAL), outcome (SUCCESS/REJECTED), reason, errorCode, checkedInAt. Log append-only. QR hỏng không xác định được sự kiện vẫn được lưu với eventId null, không xuất hiện trong lịch sử riêng của sự kiện.
+
+### Báo cáo và xuất file
+
+#### `GET /api/v1/organizer/events/:eventId/reports`
+
+Response 200: `{ "success": true, "data": { "summary": { ... }, "sales": [ ... ] } }`.
+
+- summary đọc từ mv_event_sales_summary: event_id, organizer_id, title, total_sold_tickets, total_checked_in_tickets, total_cancelled_tickets, gross_revenue, paid_revenue, total_refunded_amount, net_revenue, checkin_percentage, refreshed_at.
+- sales đọc từ mv_event_ticket_sales: event_id, organizer_id, ticket_type_id, ticket_type_name, sale_date, total_sold_tickets, total_checked_in_tickets, paid_revenue, refreshed_at.
+- Tiền là chuỗi decimal; số đếm BIGINT có thể là chuỗi. Ngày bán theo Asia/Ho_Chi_Minh. paid_revenue là tiền đã thu trước hoàn tiền; net_revenue trừ các refund COMPLETED. Doanh thu theo hạng/ngày phân bổ tiền sau giảm giá theo giá vé trong order_items.
+- Worker refresh view mỗi 5 phút; cache Redis TTL 60 giây. Redis hỏng thì đọc MV, không quay về truy vấn tổng hợp trên bảng giao dịch. Kết quả có thể chậm tối đa khoảng 6 phút; xem refreshed_at. Sự kiện chưa refresh có summary null; không coi là doanh thu 0.
+
+#### `POST /api/v1/organizer/events/:eventId/reports/exports`
+
+Body: `{ "format": "csv" }` hoặc `{ "format": "xlsx" }`. Response 202: `{ "success": true, "data": { "id": "export-uuid", "status": "PENDING", "format": "csv", "createdAt": "..." } }`. Tối đa 3 job đang PENDING/PROCESSING mỗi người dùng; vượt giới hạn trả 409. Không tạo file trong HTTP request.
+
+#### `GET /api/v1/organizer/events/:eventId/reports/exports/:exportId`
+
+Chỉ người tạo, còn quyền với sự kiện, được đọc trạng thái. Response 200 gồm id, status, format, createdAt, expiresAt, errorMessage, downloadUrl. Các trạng thái: PENDING, PROCESSING, COMPLETED, FAILED, EXPIRED. downloadUrl chỉ có khi COMPLETED; không trả đường dẫn filesystem.
+
+#### `GET /api/v1/organizer/events/:eventId/reports/exports/:exportId/download`
+
+Yêu cầu JWT và kiểm tra lại quyền. File thực sự là CSV UTF-8 hoặc XLSX, tên file do server tạo. Response 409 khi chưa xong, 410 khi hết hạn 24 giờ, 404 nếu không có file/tài nguyên thuộc người gọi. Header Cache-Control private, no-store. File không được phục vụ trực tiếp từ thư mục public.
+
+CSV ngăn công thức bắt đầu bằng =, +, -, @; Excel ghi dữ liệu không tin cậy bằng ô string, không tạo formula. Một báo cáo hỗ trợ tối đa 10.000 dòng phân tổ; vượt giới hạn báo lỗi thay vì xuất thiếu dữ liệu.

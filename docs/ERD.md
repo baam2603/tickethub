@@ -806,21 +806,82 @@ Bảng tổng hợp được làm mới định kỳ qua worker để không ả
 
 ```sql
 CREATE MATERIALIZED VIEW mv_event_sales_summary AS
-SELECT
-    e.id AS event_id,
-    e.organizer_id,
-    e.title,
-    count(DISTINCT t.id) FILTER (WHERE t.status IN ('SOLD', 'CHECKED_IN')) AS total_sold_tickets,
-    count(DISTINCT t.id) FILTER (WHERE t.status = 'CHECKED_IN') AS total_checked_in_tickets,
-    coalesce(sum(oi.subtotal) FILTER (WHERE o.status = 'PAID'), 0) AS gross_revenue,
-    coalesce(sum(r.amount) FILTER (WHERE r.status = 'COMPLETED'), 0) AS total_refunded_amount,
-    now() AS refreshed_at
-FROM events e
-LEFT JOIN orders o ON o.event_id = e.id AND o.status = 'PAID'
-LEFT JOIN order_items oi ON oi.order_id = o.id
-LEFT JOIN tickets t ON t.event_id = e.id
-LEFT JOIN refunds r ON r.order_id = o.id AND r.status = 'COMPLETED'
-GROUP BY e.id, e.organizer_id, e.title;
+WITH revenue AS (
+ SELECT event_id, sum(total_amount) AS gross_revenue, sum(final_amount) AS paid_revenue
+ FROM orders WHERE status IN ('PAID','REFUNDED') OR paid_at IS NOT NULL GROUP BY event_id
+), refunded AS (
+ SELECT o.event_id, sum(r.amount) AS total_refunded_amount
+ FROM refunds r JOIN orders o ON o.id=r.order_id WHERE r.status='COMPLETED' GROUP BY o.event_id
+), ticket_counts AS (
+ SELECT event_id,
+ count(*) FILTER(WHERE status IN ('SOLD','CHECKED_IN')) AS total_sold_tickets,
+ count(*) FILTER(WHERE status='CHECKED_IN') AS total_checked_in_tickets,
+ count(*) FILTER(WHERE status='CANCELLED') AS total_cancelled_tickets
+ FROM tickets GROUP BY event_id
+)
+SELECT e.id AS event_id,e.organizer_id,e.title,
+ COALESCE(t.total_sold_tickets,0) AS total_sold_tickets,
+ COALESCE(t.total_checked_in_tickets,0) AS total_checked_in_tickets,
+ COALESCE(t.total_cancelled_tickets,0) AS total_cancelled_tickets,
+ COALESCE(r.gross_revenue,0)::numeric AS gross_revenue,
+ COALESCE(r.paid_revenue,0)::numeric AS paid_revenue,
+ COALESCE(f.total_refunded_amount,0)::numeric AS total_refunded_amount,
+ (COALESCE(r.paid_revenue,0)-COALESCE(f.total_refunded_amount,0))::numeric AS net_revenue,
+ CASE WHEN COALESCE(t.total_sold_tickets,0)=0 THEN 0 ELSE round(t.total_checked_in_tickets::numeric*100/t.total_sold_tickets,2) END AS checkin_percentage,
+ now() AS refreshed_at
+FROM events e LEFT JOIN revenue r ON r.event_id=e.id LEFT JOIN refunded f ON f.event_id=e.id LEFT JOIN ticket_counts t ON t.event_id=e.id;
 
 CREATE UNIQUE INDEX idx_mv_event_sales_id ON mv_event_sales_summary(event_id);
 ```
+
+## Bổ sung schema tuần 5
+
+### organizer_staff
+
+Sở hữu tài khoản nhân viên theo BTC, không cho BTC nhận quản lý tài khoản tùy ý chỉ bằng email/userId.
+
+| Cột          | Kiểu        | Ràng buộc                       | Ý nghĩa                  |
+| ------------ | ----------- | ------------------------------- | ------------------------ |
+| user_id      | UUID        | PK, FK users                    | Nhân viên do BTC quản lý |
+| organizer_id | UUID        | NOT NULL, FK organizer_profiles | BTC sở hữu               |
+| created_at   | TIMESTAMPTZ | NOT NULL                        | Thời điểm tạo            |
+
+### gate_checkin_logs
+
+Nhật ký append-only cho cả QR và thủ công. ID lịch sử không có FK cascade, cùng nguyên tắc với audit_log, để không sửa hoặc mất log khi tài nguyên thay đổi.
+
+| Cột           | Kiểu         | Ràng buộc | Ý nghĩa                                  |
+| ------------- | ------------ | --------- | ---------------------------------------- |
+| id            | UUID         | PK        | Mã log                                   |
+| event_id      | UUID         | NULL      | Sự kiện, null nếu QR không xác định được |
+| ticket_id     | UUID         | NULL      | Vé đã xác định                           |
+| gate_id       | UUID         | NULL      | Cổng đã xác định                         |
+| staff_id      | UUID         | NOT NULL  | Nhân viên thực hiện                      |
+| method        | VARCHAR(20)  | NOT NULL  | QR hoặc MANUAL                           |
+| outcome       | VARCHAR(20)  | NOT NULL  | SUCCESS hoặc REJECTED                    |
+| reason        | TEXT         | NULL      | Lý do tra cứu thủ công                   |
+| error_code    | VARCHAR(100) | NULL      | Mã từ chối                               |
+| checked_in_at | TIMESTAMPTZ  | NOT NULL  | Thời điểm thao tác                       |
+
+### report_exports
+
+Hàng đợi xuất báo cáo bền vững trong PostgreSQL; dữ liệu file nằm ngoài thư mục public.
+
+| Cột           | Kiểu         | Ràng buộc                       | Ý nghĩa                            |
+| ------------- | ------------ | ------------------------------- | ---------------------------------- |
+| id            | UUID         | PK                              | Mã job                             |
+| requested_by  | UUID         | NOT NULL, FK users              | Người yêu cầu                      |
+| organizer_id  | UUID         | NOT NULL, FK organizer_profiles | BTC sở hữu                         |
+| event_id      | UUID         | NOT NULL, FK events             | Sự kiện                            |
+| format        | VARCHAR(10)  | NOT NULL                        | csv/xlsx                           |
+| status        | VARCHAR(20)  | NOT NULL                        | Trạng thái job                     |
+| attempt_id    | UUID         | NULL                            | Fencing token mỗi lần claim        |
+| file_name     | VARCHAR(100) | NULL                            | Tên file nội bộ do worker tạo      |
+| retry_count   | INTEGER      | NOT NULL                        | Số lần lỗi                         |
+| error_message | TEXT         | NULL                            | Thông báo lỗi công khai đã rút gọn |
+| next_retry_at | TIMESTAMPTZ  | NOT NULL                        | Thời điểm thử lại                  |
+| expires_at    | TIMESTAMPTZ  | NULL                            | Hạn tải file                       |
+| created_at    | TIMESTAMPTZ  | NOT NULL                        | Ngày tạo                           |
+| updated_at    | TIMESTAMPTZ  | NOT NULL                        | Ngày cập nhật/lease                |
+
+Migration 0003_w05-staff-reporting.sql tạo MV thực tế: mv_event_sales_summary và mv_event_ticket_sales. Migration tổng hợp riêng orders, refunds, tickets trước khi join, tránh nhân doanh thu khi đơn có nhiều vé hoặc nhiều refund. Worker refresh hai MV bằng CONCURRENTLY dưới advisory lock để tránh nhiều worker refresh trùng. MV không được ánh xạ thành pgTable vì chỉ đọc qua SQL tĩnh.

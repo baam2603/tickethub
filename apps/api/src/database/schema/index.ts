@@ -15,3 +15,6 @@ export * from "./audit-log";
 export * from "./outbox";
 export * from "./idempotency-keys";
 export * from "./relations";
+export * from "./organizer-staff";
+export * from "./gate-checkin-logs";
+export * from "./report-exports";

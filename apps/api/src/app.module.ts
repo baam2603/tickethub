@@ -1,3 +1,4 @@
+import { ReportingModule } from "./reporting/reporting.module";
 import { Module } from "@nestjs/common";
 import { RedisModule } from "./database/redis.module";
 import { HealthModule } from "./health/health.module";
@@ -13,6 +14,7 @@ import { RefundsModule } from "./refunds/refunds.module";
 import { TicketsModule } from "./tickets/tickets.module";
 @Module({
   imports: [
+    ReportingModule,
     RedisModule,
     HealthModule,
     AuthModule,
