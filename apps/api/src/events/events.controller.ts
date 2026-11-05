@@ -12,7 +12,13 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  Sse,
+  Req,
+  MessageEvent,
 } from "@nestjs/common";
+import type { FastifyRequest } from "fastify";
+import type { Observable } from "rxjs";
+import { SeatStreamService } from "./seat-stream.service";
 import {
   EventsService,
   GenerateSeatsDto,
@@ -167,7 +173,20 @@ export class PublicEventsController {
 
     @Inject(EventReadCacheService)
     private readonly cacheService: EventReadCacheService,
+
+    @Inject(SeatStreamService)
+    private readonly seatStreamService: SeatStreamService,
   ) {}
+
+  // GET /api/v1/events/:id/seats/stream
+  // Luong Server-Sent Events cap nhat trang thai ghe thoi gian thuc
+  @Sse(":id/seats/stream")
+  streamSeats(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() req: FastifyRequest,
+  ): Observable<MessageEvent> {
+    return this.seatStreamService.createSeatStream(id, req?.raw?.signal);
+  }
 
   // GET /api/v1/events
   // Lay danh sach su kien cong khai
