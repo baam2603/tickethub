@@ -923,13 +923,116 @@ hoặc
 
 - Response 200: Trả về thông tin sự kiện đã cập nhật.
 
-#### [PLANNED] `POST /api/v1/admin/events/:id/kill-switch`
+#### `POST /api/v1/admin/events/:id/kill-switch`
 
-Kích hoạt dừng khẩn cấp sự kiện vi phạm.
+Kích hoạt dừng khẩn cấp sự kiện vi phạm (Emergency Kill Switch). Chuyển trạng thái sự kiện sang `SUSPENDED`, hủy toàn bộ các đơn hàng chưa thanh toán (`PENDING` sang `CANCELLED`), giải phóng toàn bộ ghế ngồi đang bị giữ (`HELD` sang `AVAILABLE`), reset số lượng giữ vé đứng GA về 0, xóa cache sự kiện trên Redis và ghi nhật ký kiểm toán bất biến `audit_log`.
 
+- Quyền: `ADMIN`
 - Header: `Authorization: Bearer <adminToken>`
-- Request body: `{ "reason": "Phát hiện thông tin giả mạo" }`
-- Response 200: Sự kiện chuyển `SUSPENDED`, hủy các đơn đang giữ chỗ và giải tán hàng chờ.
+- Request body:
+
+```json
+{
+  "reason": "Phát hiện thông tin giả mạo hoặc sự cố an ninh nghiêm trọng",
+  "version": 1
+}
+```
+
+- Response: `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "eventId": "evt-uuid",
+    "status": "SUSPENDED",
+    "rejectionReason": "Phát hiện thông tin giả mạo hoặc sự cố an ninh nghiêm trọng",
+    "version": 2,
+    "cancelledPendingOrdersCount": 3,
+    "releasedHeldSeatsCount": 2,
+    "releasedHeldStandingCount": 5,
+    "totalReleasedHoldsCount": 7,
+    "suspendedAt": "2026-11-20T19:30:00.000Z"
+  }
+}
+```
+
+#### `POST /api/v1/admin/events/:id/resume`
+
+Khôi phục mở bán sự kiện đã bị đình chỉ trở lại trạng thái `PUBLISHED` sau khi ban tổ chức giải trình và khắc phục xong vi phạm. Chỉ áp dụng cho sự kiện chưa kết thúc (`endTime > NOW()`).
+
+- Quyền: `ADMIN`
+- Header: `Authorization: Bearer <adminToken>`
+- Request body (tùy chọn):
+
+```json
+{
+  "reason": "Ban tổ chức đã bổ sung đầy đủ giấy phép biểu diễn hợp lệ",
+  "version": 2
+}
+```
+
+- Response: `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "eventId": "evt-uuid",
+    "status": "PUBLISHED",
+    "version": 3,
+    "resumedAt": "2026-11-20T20:00:00.000Z"
+  }
+}
+```
+
+#### `GET /api/v1/admin/events/:id/audit-logs`
+
+Truy vấn danh sách lịch sử kiểm toán bất biến theo sự kiện phục vụ trang điều khiển khẩn cấp `/admin/events/[id]/control`.
+
+- Quyền: `ADMIN`
+- Header: `Authorization: Bearer <adminToken>`
+- Query params:
+  - `page`: Số trang (mặc định 1)
+  - `limit`: Số bản ghi mỗi trang (mặc định 20, tối đa 100)
+  - `action`: Lọc theo loại hành động kiểm toán (tùy chọn)
+- Response: `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": 12,
+        "actorId": "admin-uuid",
+        "actorRole": "ADMIN",
+        "action": "EVENT_KILL_SWITCH_ACTIVATED",
+        "targetType": "EVENT",
+        "targetId": "evt-uuid",
+        "changes": {
+          "oldStatus": "PUBLISHED",
+          "newStatus": "SUSPENDED",
+          "reason": "Phát hiện thông tin giả mạo",
+          "cancelledPendingOrdersCount": 3,
+          "releasedHeldSeatsCount": 2,
+          "releasedHeldStandingCount": 5,
+          "totalReleasedHoldsCount": 7
+        },
+        "ipAddress": "127.0.0.1",
+        "userAgent": "Mozilla/5.0 ...",
+        "createdAt": "2026-11-20T19:30:00.000Z"
+      }
+    ],
+    "meta": {
+      "total": 1,
+      "page": 1,
+      "limit": 20,
+      "totalPages": 1
+    }
+  }
+}
+```
 
 #### [PLANNED] `GET /api/v1/admin/reconciliations`
 
