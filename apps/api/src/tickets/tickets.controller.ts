@@ -20,14 +20,6 @@ export class TicketsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
   ) {
-    const data = await this.ticketsService.getTicketQr(
-      user.userId,
-      user.role,
-      id,
-    );
-    return {
-      success: true,
-      data,
-    };
+    return this.ticketsService.getTicketQr(user.userId, user.role, id);
   }
 }

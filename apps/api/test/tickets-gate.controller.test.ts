@@ -82,10 +82,9 @@ describe("TicketsController & GateController Unit Tests", () => {
 
   it("successfully retrieves dynamic QR token via TicketsController", async () => {
     const res = await ticketsController.getQrToken(mockUser, "tkt-123");
-    assert.equal(res.success, true);
-    assert.equal(res.data.ticketId, "tkt-123");
-    assert.equal(res.data.qrToken, "mock.ed25519.token");
-    assert.equal(res.data.remainingSeconds, 30);
+    assert.equal(res.ticketId, "tkt-123");
+    assert.equal(res.qrToken, "mock.ed25519.token");
+    assert.equal(res.remainingSeconds, 30);
   });
 
   it("successfully scans ticket via GateController", async () => {
@@ -93,9 +92,8 @@ describe("TicketsController & GateController Unit Tests", () => {
       qrToken: "valid.token",
       gateId: "7b82fe51-4029-4d2c-9a3b-285b001a1d12",
     });
-    assert.equal(res.success, true);
-    assert.equal(res.data.status, "CHECKED_IN");
-    assert.equal(res.data.ticketId, "ticket-123");
+    assert.equal(res.status, "CHECKED_IN");
+    assert.equal(res.ticketId, "ticket-123");
   });
 
   it("rejects scan request when qrToken is invalid or empty", async () => {
@@ -115,7 +113,6 @@ describe("TicketsController & GateController Unit Tests", () => {
       phoneOrEmailLast4: "1234",
       reason: "Het pin",
     });
-    assert.equal(res.success, true);
-    assert.equal(res.data.method, "MANUAL_LOOKUP");
+    assert.equal(res.method, "MANUAL_LOOKUP");
   });
 });

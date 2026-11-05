@@ -46,16 +46,11 @@ export class GateController {
       });
     }
 
-    const data = await this.ticketsService.scanTicket(
+    return this.ticketsService.scanTicket(
       user.userId,
       user.role,
       parseResult.data,
     );
-
-    return {
-      success: true,
-      data,
-    };
   }
 
   @Post("lookup")
@@ -77,15 +72,10 @@ export class GateController {
       });
     }
 
-    const data = await this.ticketsService.lookupTicket(
+    return this.ticketsService.lookupTicket(
       user.userId,
       user.role,
       parseResult.data,
     );
-
-    return {
-      success: true,
-      data,
-    };
   }
 }
