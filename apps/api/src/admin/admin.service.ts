@@ -464,6 +464,8 @@ export class AdminService {
         .update(seats)
         .set({
           status: SeatStatus.AVAILABLE,
+          holdOrderId: null,
+          holdExpiresAt: null,
           updatedAt: now,
         })
         .where(
@@ -549,7 +551,6 @@ export class AdminService {
 
     // 7. Xóa cache Redis
     await this.eventReadCacheService?.invalidate(eventId);
-    await this.eventReadCacheService?.invalidateList();
 
     return result;
   }
@@ -654,7 +655,6 @@ export class AdminService {
 
     // Xóa cache Redis
     await this.eventReadCacheService?.invalidate(eventId);
-    await this.eventReadCacheService?.invalidateList();
 
     return result;
   }
