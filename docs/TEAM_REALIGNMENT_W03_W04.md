@@ -83,9 +83,9 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 
 - **Gói W03-BE1 (Tiến độ: 100% - Đã nghiệm thu tại PR #14)**:
   - Đã kiểm chứng thuật toán Auto-Seat Allocation, transaction phân tầng PostgreSQL và tác vụ dọn dẹp đơn hết hạn.
-- **Gói W04-BE1 (Tiến độ: 20% - Mở song song)**:
+- **Gói W04-BE1 (Tiến độ: 100% - Đã hoàn tất và nghiệm thu)**:
   - Hoàn tất đơn hàng nguyên tử khi nhận tín hiệu thanh toán thành công (PENDING sang PAID, HELD sang SOLD, sinh mã vé).
-  - Thiết lập endpoint SSE đẩy trạng thái ghế cập nhật thời gian thực qua Redis Pub/Sub.
+  - Thiết lập endpoint SSE đẩy trạng thái ghế cập nhật thời gian thực qua Redis Pub/Sub (`GET /api/v1/events/:id/seats/stream`).
   - Xây dựng API hủy vé và hoàn tiền theo chính sách (UC06).
 
 ### 2.5 Tuấn Khôi (Backend Integration)

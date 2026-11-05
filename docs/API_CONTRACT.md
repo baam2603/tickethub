@@ -307,9 +307,9 @@ Lấy thông tin tồn kho và số lượng vé còn lại của từng hạng 
   }
   ```
 
-#### `GET /api/v1/events/:id/seats/stream` (SSE) [PLANNED]
+#### `GET /api/v1/events/:id/seats/stream` (SSE)
 
-Cập nhật trạng thái ghế theo thời gian thực.
+Cập nhật trạng thái ghế theo thời gian thực qua Redis Pub/Sub.
 
 - Tên sự kiện: `seat_status_changed`
 - Dữ liệu gửi về:
