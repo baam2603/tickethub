@@ -527,6 +527,31 @@ Xem chi tiết đơn hàng giữ chỗ hiện tại và thời gian đếm ngư�
   }
   ```
 
+### Quản lý đơn hàng người mua (`/buyer/orders`)
+
+#### `GET /api/v1/buyer/orders`
+
+Lấy danh sách lịch sử đơn hàng của người mua đang đăng nhập.
+
+- Quyền: `BUYER`, `ADMIN`
+- Header: `Authorization: Bearer <accessToken>`
+- Query params:
+  - `page` (optional, mặc định: 1)
+  - `limit` (optional, mặc định: 10, tối đa: 50)
+  - `status` (optional: `PENDING`, `PAID`, `CANCELLED`, `REFUNDED`)
+- Response 200: Danh sách đơn hàng tóm tắt kèm thông tin sự kiện, tổng tiền và số lượng vé.
+
+#### `GET /api/v1/buyer/orders/:id`
+
+Xem chi tiết chuyên sâu của một đơn hàng.
+
+- Quyền: `BUYER` (chỉ xem đơn của chính mình), `ADMIN` (xem mọi đơn hàng)
+- Header: `Authorization: Bearer <accessToken>`
+- Path param: `id` (UUID của đơn hàng)
+- Response 200: Chi tiết đơn hàng, sự kiện, các hạng vé, danh sách vé điện tử kèm vị trí ghế (hoặc GA vé đứng không nhãn N/A), và lịch sử hoàn tiền.
+- Lỗi 403: `ACCESS_DENIED` nếu người dùng không phải chủ sở hữu đơn hàng (ngăn chặn IDOR).
+- Lỗi 404: `ORDER_NOT_FOUND` nếu đơn hàng không tồn tại.
+
 ### Thanh toán VNPay (`/payments`)
 
 #### `POST /api/v1/payments/orders/:orderId/vnpay`
@@ -610,12 +635,19 @@ Webhook tiếp nhận thông báo kết quả từ cổng VNPay.
 
 ### Vé điện tử và soát vé (`/tickets` và `/gate`)
 
-#### [PLANNED] `GET /api/v1/tickets/my-tickets`
+#### `GET /api/v1/tickets/my-tickets`
 
 Lấy danh sách vé đã mua của người dùng đăng nhập.
 
+- Quyền: `BUYER`, `ADMIN`
 - Header: `Authorization: Bearer <accessToken>`
-- Response 200: Danh sách vé kèm thông tin sự kiện, vị trí ghế và trạng thái.
+- Query params:
+  - `page` (optional, mặc định: 1)
+  - `limit` (optional, mặc định: 20, tối đa: 100)
+  - `status` (optional: `SOLD`, `CHECKED_IN`, `CANCELLED`; mặc định: chỉ lấy `SOLD` và `CHECKED_IN`)
+  - `eventId` (optional: lọc theo UUID sự kiện)
+- Sắp xếp mặc định: `events.startTime ASC, tickets.id ASC`
+- Response 200: Danh sách vé kèm thông tin sự kiện, vị trí ghế (hoặc GA vé đứng không nhãn N/A) và trạng thái.
 
 #### `GET /api/v1/tickets/:id/qr`
 
