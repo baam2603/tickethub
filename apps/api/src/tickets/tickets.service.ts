@@ -5,13 +5,14 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, count, asc } from "drizzle-orm";
 import { db } from "../database/db";
 import {
   auditLog,
   events,
   eventStaff,
   gates,
+  orders,
   seats,
   tickets,
   ticketTypes,
@@ -24,10 +25,17 @@ import {
   GateScanRequest,
   GateScanResponse,
   GetTicketQrResponse,
+  MyTicketsQuery,
+  MyTicketsListResponse,
+  MyTicketItem,
   TicketStatus,
   UserRole,
 } from "@tickethub/shared";
 import { Ed25519Service } from "./crypto/ed25519.service";
+import {
+  formatTicketSeatInfo,
+  calculateEffectivePaidPrice,
+} from "../booking/buyer-order.service";
 
 @Injectable()
 export class TicketsService {
@@ -435,4 +443,130 @@ export class TicketsService {
       method: "MANUAL_LOOKUP",
     };
   }
+
+  /**
+   * Lấy danh sách vé đã mua của người dùng (Ví vé cá nhân)
+   */
+  async getMyTickets(
+    userId: string,
+    query: MyTicketsQuery,
+  ): Promise<MyTicketsListResponse> {
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    const offset = (page - 1) * limit;
+
+    const whereConditions = [eq(tickets.userId, userId)];
+
+    if (query.eventId) {
+      whereConditions.push(eq(tickets.eventId, query.eventId));
+    }
+
+    if (query.status) {
+      whereConditions.push(eq(tickets.status, query.status));
+    } else {
+      whereConditions.push(
+        inArray(tickets.status, [TicketStatus.SOLD, TicketStatus.CHECKED_IN]),
+      );
+    }
+
+    const combinedWhere = and(...whereConditions);
+
+    const countResult = await db
+      .select({ value: count() })
+      .from(tickets)
+      .where(combinedWhere);
+    const total = countResult[0]?.value ? Number(countResult[0].value) : 0;
+    const totalPages = Math.ceil(total / limit);
+
+    const rows = await db
+      .select({
+        ticketId: tickets.id,
+        ticketCode: tickets.ticketCode,
+        ticketStatus: tickets.status,
+        checkedInAt: tickets.checkedInAt,
+        orderId: orders.id,
+        orderCode: orders.orderCode,
+        orderTotalAmount: orders.totalAmount,
+        orderFinalAmount: orders.finalAmount,
+        eventId: events.id,
+        eventTitle: events.title,
+        eventBannerUrl: events.bannerUrl,
+        eventStartTime: events.startTime,
+        eventEndTime: events.endTime,
+        eventVenueName: events.venueName,
+        eventCity: events.city,
+        eventStatus: events.status,
+        ticketTypeId: ticketTypes.id,
+        ticketTypeName: ticketTypes.name,
+        ticketTypePrice: ticketTypes.price,
+        isSeated: ticketTypes.isSeated,
+        seatId: seats.id,
+        seatZoneName: seats.zoneName,
+        seatRowLabel: seats.rowLabel,
+        seatNumber: seats.seatNumber,
+      })
+      .from(tickets)
+      .innerJoin(events, eq(tickets.eventId, events.id))
+      .innerJoin(orders, eq(tickets.orderId, orders.id))
+      .innerJoin(ticketTypes, eq(tickets.ticketTypeId, ticketTypes.id))
+      .leftJoin(seats, eq(tickets.seatId, seats.id))
+      .where(combinedWhere)
+      .orderBy(asc(events.startTime), asc(tickets.id))
+      .limit(limit)
+      .offset(offset);
+
+    const items: MyTicketItem[] = rows.map((row) => {
+      const price = Number(row.ticketTypePrice);
+      const effectivePaidPrice = calculateEffectivePaidPrice(
+        price,
+        Number(row.orderTotalAmount),
+        Number(row.orderFinalAmount),
+      );
+      const seatInfo = formatTicketSeatInfo(
+        row.isSeated,
+        row.ticketTypeName,
+        row.seatId
+          ? {
+              zoneName: row.seatZoneName!,
+              rowLabel: row.seatRowLabel!,
+              seatNumber: row.seatNumber!,
+            }
+          : null,
+      );
+
+      return {
+        id: row.ticketId,
+        ticketCode: row.ticketCode,
+        status: row.ticketStatus,
+        price,
+        effectivePaidPrice,
+        checkedInAt: row.checkedInAt ? row.checkedInAt.toISOString() : null,
+        orderId: row.orderId,
+        orderCode: row.orderCode,
+        eventId: row.eventId,
+        eventTitle: row.eventTitle,
+        eventBannerUrl: row.eventBannerUrl,
+        eventStartTime: row.eventStartTime.toISOString(),
+        eventEndTime: row.eventEndTime.toISOString(),
+        eventVenueName: row.eventVenueName,
+        eventCity: row.eventCity,
+        eventStatus: row.eventStatus,
+        ticketTypeId: row.ticketTypeId,
+        ticketTypeName: row.ticketTypeName,
+        isSeated: row.isSeated,
+        seatInfo,
+      };
+    });
+
+    return {
+      items,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+      },
+    };
+  }
 }
+
