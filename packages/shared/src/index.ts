@@ -7,3 +7,4 @@ export * from "./schemas/admin.schema";
 export * from "./schemas/upload.schema";
 export * from "./schemas/refund.schema";
 export * from "./schemas/ticket-checkin.schema";
+export * from "./schemas/admin-killswitch.schema";
