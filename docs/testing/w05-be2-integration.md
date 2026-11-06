@@ -152,3 +152,11 @@ Kiểm thử tự động xác minh outbox nguyên tử, không gửi email th�
 Phí nền tảng/cổng và khoản thực nhận cuối cùng chưa thể tính khi nhóm chưa chốt nghiệp vụ;
 không gọi net_revenue sau hoàn là net payout. Email live cần cấu hình provider và tích hợp FE như trên.
 Không tuyên bố toàn bộ UC09 nghiệm thu chỉ dựa vào test backend; cần FE chạy chung và kiểm thử chấp nhận của nhóm.
+
+## Đồng hồ worker
+
+Nhận job, retry, lease và hạn file dùng giờ PostgreSQL thay vì so sánh giờ Node với giờ database.
+Điều này tránh job mới bị giữ PENDING khi Windows và PostgreSQL Docker lệch giờ.
+Bộ W05 hiện có 19 ca, gồm đối chứng đồng hồ chậm/nhanh và kiểm tra không bỏ qua backoff.
+
+Khi chạy suite tự động, dừng report worker riêng đang trỏ vào cùng database test để tránh hai tiến trình tranh job. Suite tự khởi động API và gọi worker, không cần bật dev backend hay worker bên ngoài. Bản sửa đồng hồ không yêu cầu migration mới.

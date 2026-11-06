@@ -1186,6 +1186,73 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
     assert.equal(accounts.body.meta.page, 1);
     assert.equal((await request(`${root}/gates?page=0`)).status, 400);
   });
+  it("Worker dung dong ho DB khi Windows cham hoac nhanh hon PostgreSQL", async () => {
+    const target = await makeEvent(orgProfile, "Clock skew");
+    const root = `/api/v1/organizer/events/${target}/reports/exports`;
+    const OriginalDate = globalThis.Date;
+    let offset = -60000;
+    class ShiftedDate extends OriginalDate {
+      constructor(value?: string | number) {
+        super(value === undefined ? OriginalDate.now() + offset : value);
+      }
+      static now() {
+        return OriginalDate.now() + offset;
+      }
+    }
+    globalThis.Date = ShiftedDate as DateConstructor;
+    try {
+      const created = await request(root, "POST", { format: "csv" });
+      assert.equal(created.status, 202, JSON.stringify(created.body));
+      const id = created.body.data.id;
+      assert.equal(
+        await processReportExport(id),
+        true,
+        "Job DB vua tao phai duoc nhan du OS cham 60 giay",
+      );
+      assert.equal(
+        (await request(`${root}/${id}`)).body.data.status,
+        "COMPLETED",
+      );
+      offset = 2 * 86400000;
+      assert.equal(
+        (await request(`${root}/${id}`)).body.data.status,
+        "COMPLETED",
+        "OS nhanh khong lam file het han som",
+      );
+      const listed = await request(root);
+      assert.equal(listed.body.data[0].status, "COMPLETED");
+      assert.ok(listed.body.data[0].downloadUrl);
+      const delayed = await request(root, "POST", { format: "csv" });
+      assert.equal(delayed.status, 202);
+      const delayedId = delayed.body.data.id;
+      await db
+        .update(reportExports)
+        .set({ nextRetryAt: sql`clock_timestamp() + interval '1 minute'` })
+        .where(eq(reportExports.id, delayedId));
+      assert.equal(
+        await processReportExport(delayedId),
+        false,
+        "OS nhanh khong duoc bo qua backoff cua DB",
+      );
+      await db
+        .update(reportExports)
+        .set({
+          status: "PROCESSING",
+          attemptId: randomUUID(),
+          nextRetryAt: sql`clock_timestamp() - interval '1 second'`,
+          updatedAt: sql`clock_timestamp() - interval '6 minutes'`,
+        })
+        .where(eq(reportExports.id, delayedId));
+      offset = -60000;
+      assert.equal(await processReportExport(delayedId), true);
+      assert.equal(
+        (await request(`${root}/${delayedId}`)).body.data.status,
+        "COMPLETED",
+      );
+    } finally {
+      globalThis.Date = OriginalDate;
+    }
+  });
   it("Gioi han job dang cho va khong nhan dinh dang/duong dan tuy y", async () => {
     for (let i = 0; i < 3; i++)
       assert.equal(

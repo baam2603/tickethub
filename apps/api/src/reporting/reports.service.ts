@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type Redis from "ioredis";
 import { db } from "../database/db";
 import { gateCheckinLogs, reportExports, users } from "../database/schema";
@@ -134,6 +134,7 @@ export class ReportsService {
         format: reportExports.format,
         createdAt: reportExports.createdAt,
         expiresAt: reportExports.expiresAt,
+        expired: sql<boolean>`${reportExports.expiresAt} <= clock_timestamp()`,
         errorMessage: reportExports.errorMessage,
         ticketTypeId: reportExports.ticketTypeId,
         voucherCode: reportExports.voucherCode,
@@ -151,16 +152,11 @@ export class ReportsService {
       .orderBy(desc(reportExports.createdAt), desc(reportExports.id))
       .limit(page.limit + 1)
       .offset((page.page - 1) * page.limit);
-    return jobs.map((job) => ({
+    return jobs.map(({ expired, ...job }) => ({
       ...job,
-      status:
-        job.expiresAt && job.expiresAt.getTime() <= Date.now()
-          ? "EXPIRED"
-          : job.status,
+      status: expired ? "EXPIRED" : job.status,
       downloadUrl:
-        job.status === "COMPLETED" &&
-        job.expiresAt &&
-        job.expiresAt.getTime() > Date.now()
+        job.status === "COMPLETED" && job.expiresAt && !expired
           ? `/api/v1/organizer/events/${eventId}/reports/exports/${job.id}/download`
           : null,
     }));
@@ -168,6 +164,12 @@ export class ReportsService {
   async exportStatus(userId: string, eventId: string, exportId: string) {
     const { profile } = await requireEvent(userId, eventId);
     const job = await db.query.reportExports.findFirst({
+      extras: {
+        expired:
+          sql<boolean>`${reportExports.expiresAt} <= clock_timestamp()`.as(
+            "expired",
+          ),
+      },
       where: and(
         eq(reportExports.id, exportId),
         eq(reportExports.eventId, eventId),
@@ -176,7 +178,7 @@ export class ReportsService {
       ),
     });
     if (!job) throw new NotFoundException("EXPORT_NOT_FOUND");
-    const expired = job.expiresAt && job.expiresAt.getTime() <= Date.now();
+    const expired = job.expired;
     return { ...job, status: expired ? "EXPIRED" : job.status };
   }
   async download(userId: string, eventId: string, exportId: string) {

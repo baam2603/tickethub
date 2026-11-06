@@ -101,3 +101,17 @@ Chạy image với NODE_ENV=production trên database tickethub_w05_fresh_test:
 API /health trả 200, PostgreSQL và Redis healthy; report worker --once kết thúc 0;
 user node ghi/xóa tệp thử trong named volume report-exports thành công. Container và volume smoke được dọn sau kiểm tra.
 Đây là kiểm tra runtime cục bộ, chưa thay thế chạy E2E FE1 hoặc triển khai production.
+
+## Sửa lỗi đồng hồ Windows/PostgreSQL
+
+Log người dùng trên Windows có 2 job còn PENDING và ca giới hạn hàng đợi trả 409 do job trước chưa được xử lý.
+Worker cũ so sánh next_retry_at do PostgreSQL tạo với new Date() của Node; hai đồng hồ khác nhau có thể khiến
+job mới chưa đến hạn theo Node dù đã hợp lệ theo database.
+
+Đã dùng clock_timestamp() của PostgreSQL cho nhận job, retry/backoff, lease, hạn file, dọn file và trạng thái hết hạn.
+Timestamp cập nhật của outbox được chuẩn hóa millisecond để so khớp fencing qua Date không mất phần microsecond.
+Thêm test Node chậm 60 giây/nhanh 2 ngày, giữ database thật. Đối chứng worker cũ thất bại đúng tại nhận job;
+bản sửa đạt 19/19 ca W05, không skip. Không dùng sleep để che lỗi và không bỏ giới hạn hàng đợi.
+Cần người dùng pull bản sửa và chạy lại Windows; kết quả mô phỏng trên Linux không thay thế xác nhận Windows thực tế.
+
+Kiểm thử hồi quy sau bản sửa: pnpm test đạt 210/210 API và 28/28 web, không skip; build API, typecheck, lint API, format và audit-doc-parity đều PASS. Không thêm migration cho bản sửa này.

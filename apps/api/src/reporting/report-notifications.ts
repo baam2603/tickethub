@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, or } from "drizzle-orm";
+import { and, asc, eq, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../database/db";
 import { outbox, reportExports, users } from "../database/schema";
@@ -38,12 +38,15 @@ export async function processReportNotification() {
       .where(
         and(
           eq(outbox.eventType, REPORT_READY),
-          lte(outbox.nextRetryAt, new Date()),
+          lte(outbox.nextRetryAt, sql`clock_timestamp()`),
           or(
             eq(outbox.status, "PENDING"),
             and(
               eq(outbox.status, "PROCESSING"),
-              lte(outbox.updatedAt, new Date(Date.now() - 300000)),
+              lte(
+                outbox.updatedAt,
+                sql`clock_timestamp() - interval '5 minutes'`,
+              ),
             ),
           ),
         ),
@@ -54,7 +57,10 @@ export async function processReportNotification() {
     if (!found) return null;
     const [claimed] = await tx
       .update(outbox)
-      .set({ status: "PROCESSING", updatedAt: new Date() })
+      .set({
+        status: "PROCESSING",
+        updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
+      })
       .where(eq(outbox.id, found.id))
       .returning();
     return claimed!;
@@ -64,13 +70,14 @@ export async function processReportNotification() {
     const payload = PayloadSchema.parse(event.payload);
     const job = await db.query.reportExports.findFirst({
       where: eq(reportExports.id, payload.exportId),
+      extras: {
+        expired:
+          sql<boolean>`${reportExports.expiresAt} <= clock_timestamp()`.as(
+            "expired",
+          ),
+      },
     });
-    if (
-      !job ||
-      job.status !== "COMPLETED" ||
-      !job.expiresAt ||
-      job.expiresAt.getTime() <= Date.now()
-    )
+    if (!job || job.status !== "COMPLETED" || !job.expiresAt || job.expired)
       throw new Error("REPORT_NO_LONGER_AVAILABLE");
     await requireEvent(job.requestedBy, job.eventId);
     const recipient = await db.query.users.findFirst({
@@ -107,7 +114,11 @@ export async function processReportNotification() {
       throw new Error("REPORT_EMAIL_PROVIDER_FAILED");
     await db
       .update(outbox)
-      .set({ status: "COMPLETED", errorMessage: null, updatedAt: new Date() })
+      .set({
+        status: "COMPLETED",
+        errorMessage: null,
+        updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
+      })
       .where(
         and(
           eq(outbox.id, event.id),
@@ -123,8 +134,8 @@ export async function processReportNotification() {
         status: retry >= 3 ? "FAILED" : "PENDING",
         retryCount: retry,
         errorMessage: "REPORT_NOTIFICATION_FAILED",
-        nextRetryAt: new Date(Date.now() + 2000 * 2 ** retry),
-        updatedAt: new Date(),
+        nextRetryAt: sql`clock_timestamp() + ${2000 * 2 ** retry} * interval '1 millisecond'`,
+        updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
       })
       .where(
         and(

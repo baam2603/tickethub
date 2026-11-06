@@ -1,5 +1,5 @@
 import { HttpException } from "@nestjs/common";
-import { and, asc, eq, lte, or } from "drizzle-orm";
+import { and, asc, eq, lte, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink, rename } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,12 +28,15 @@ export async function processReportExport(targetId?: string) {
       .where(
         and(
           targetId ? eq(reportExports.id, targetId) : undefined,
-          lte(reportExports.nextRetryAt, new Date()),
+          lte(reportExports.nextRetryAt, sql`clock_timestamp()`),
           or(
             eq(reportExports.status, "PENDING"),
             and(
               eq(reportExports.status, "PROCESSING"),
-              lte(reportExports.updatedAt, new Date(Date.now() - 300000)),
+              lte(
+                reportExports.updatedAt,
+                sql`clock_timestamp() - interval '5 minutes'`,
+              ),
             ),
           ),
         ),
@@ -47,7 +50,7 @@ export async function processReportExport(targetId?: string) {
       .set({
         status: "PROCESSING",
         attemptId: randomUUID(),
-        updatedAt: new Date(),
+        updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
       })
       .where(eq(reportExports.id, found.id))
       .returning();
@@ -188,8 +191,8 @@ export async function processReportExport(targetId?: string) {
           status: "COMPLETED",
           fileName: name,
           errorMessage: null,
-          expiresAt: new Date(Date.now() + 86400000),
-          updatedAt: new Date(),
+          expiresAt: sql`clock_timestamp() + interval '24 hours'`,
+          updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
         })
         .where(
           and(
@@ -228,8 +231,8 @@ export async function processReportExport(targetId?: string) {
         status: tooLarge || retry >= 3 ? "FAILED" : "PENDING",
         retryCount: retry,
         errorMessage: code,
-        nextRetryAt: new Date(Date.now() + 2000 * 2 ** retry),
-        updatedAt: new Date(),
+        nextRetryAt: sql`clock_timestamp() + ${2000 * 2 ** retry} * interval '1 millisecond'`,
+        updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
       })
       .where(
         and(
@@ -247,7 +250,7 @@ export async function cleanupReportExports() {
     .where(
       and(
         eq(reportExports.status, "COMPLETED"),
-        lte(reportExports.expiresAt, new Date()),
+        lte(reportExports.expiresAt, sql`clock_timestamp()`),
       ),
     )
     .limit(100);
@@ -259,7 +262,11 @@ export async function cleanupReportExports() {
       });
     await db
       .update(reportExports)
-      .set({ status: "EXPIRED", fileName: null, updatedAt: new Date() })
+      .set({
+        status: "EXPIRED",
+        fileName: null,
+        updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
+      })
       .where(eq(reportExports.id, job.id));
   }
 }
