@@ -1,5 +1,5 @@
 {
-  "id": "2798e67f-a0b8-49de-8848-bf7086870ccc",
+  "id": "8a4cc142-0fae-4e18-95ad-ca30eb946f8a",
   "prevId": "4dd9342f-ecd7-4bd2-95e2-b5e8c4ad07fe",
   "version": "7",
   "dialect": "postgresql",
@@ -1372,6 +1372,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "provider_group_id": {
+          "name": "provider_group_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_amount": {
+          "name": "provider_amount",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "last_attempt_at": {
           "name": "last_attempt_at",
           "type": "timestamp with time zone",
@@ -1447,6 +1459,15 @@
           "tableFrom": "refunds",
           "tableTo": "tickets",
           "columnsFrom": ["ticket_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "refunds_provider_group_id_refunds_id_fk": {
+          "name": "refunds_provider_group_id_refunds_id_fk",
+          "tableFrom": "refunds",
+          "tableTo": "refunds",
+          "columnsFrom": ["provider_group_id"],
           "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -2244,347 +2265,6 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.organizer_staff": {
-      "name": "organizer_staff",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organizer_id": {
-          "name": "organizer_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_organizer_staff_owner": {
-          "name": "idx_organizer_staff_owner",
-          "columns": [
-            {
-              "expression": "organizer_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "organizer_staff_user_id_users_id_fk": {
-          "name": "organizer_staff_user_id_users_id_fk",
-          "tableFrom": "organizer_staff",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "organizer_staff_organizer_id_organizer_profiles_id_fk": {
-          "name": "organizer_staff_organizer_id_organizer_profiles_id_fk",
-          "tableFrom": "organizer_staff",
-          "tableTo": "organizer_profiles",
-          "columnsFrom": ["organizer_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.gate_checkin_logs": {
-      "name": "gate_checkin_logs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ticket_id": {
-          "name": "ticket_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "gate_id": {
-          "name": "gate_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "staff_id": {
-          "name": "staff_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "method": {
-          "name": "method",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error_code": {
-          "name": "error_code",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "checked_in_at": {
-          "name": "checked_in_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_gate_logs_event_time": {
-          "name": "idx_gate_logs_event_time",
-          "columns": [
-            {
-              "expression": "event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "checked_in_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.report_exports": {
-      "name": "report_exports",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "requested_by": {
-          "name": "requested_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "organizer_id": {
-          "name": "organizer_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "format": {
-          "name": "format",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ticket_type_id": {
-          "name": "ticket_type_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "voucher_code": {
-          "name": "voucher_code",
-          "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "from_date": {
-          "name": "from_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "to_date": {
-          "name": "to_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'PENDING'"
-        },
-        "attempt_id": {
-          "name": "attempt_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "file_name": {
-          "name": "file_name",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "retry_count": {
-          "name": "retry_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "error_message": {
-          "name": "error_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "next_retry_at": {
-          "name": "next_retry_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_report_exports_pending": {
-          "name": "idx_report_exports_pending",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "next_retry_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "report_exports_requested_by_users_id_fk": {
-          "name": "report_exports_requested_by_users_id_fk",
-          "tableFrom": "report_exports",
-          "tableTo": "users",
-          "columnsFrom": ["requested_by"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "report_exports_organizer_id_organizer_profiles_id_fk": {
-          "name": "report_exports_organizer_id_organizer_profiles_id_fk",
-          "tableFrom": "report_exports",
-          "tableTo": "organizer_profiles",
-          "columnsFrom": ["organizer_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "report_exports_event_id_events_id_fk": {
-          "name": "report_exports_event_id_events_id_fk",
-          "tableFrom": "report_exports",
-          "tableTo": "events",
-          "columnsFrom": ["event_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

@@ -15,7 +15,8 @@
     "start:outbox-dispatcher": "tsx src/jobs/outbox.dispatcher.ts",
     "start:outbox-recovery": "tsx src/jobs/outbox-recovery.ts",
     "start:payment-worker": "tsx src/jobs/payment.worker.ts",
-    "start:report-worker": "tsx src/jobs/report.worker.ts"
+    "start:report-worker": "tsx src/jobs/report.worker.ts",
+    "test:isolated": "tsx test/run-isolated.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1161.0",

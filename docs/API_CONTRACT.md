@@ -538,6 +538,7 @@ Khởi tạo giao dịch thanh toán VNPay và nhận URL chuyển hướng đ�
 - Response 201: `{ "success": true, "data": { "decision": "APPLY_SUCCESS", "responseCode": "00" } }`.
 - `ALREADY_PROCESSED`: giao dịch đã được xử lý; `MANUAL_REVIEW`: kết quả chưa xác định; `AMOUNT_MISMATCH`: không khớp tiền.
 - HTTP 400 nếu giao dịch cũ thiếu ngày tạo VNPay; HTTP 404 nếu không có giao dịch thuộc người gọi; HTTP 503 nếu VNPay lỗi, timeout hoặc phản hồi không xác minh được.
+- `vnp_IpAddr` lấy IP merchant từ `VNPAY_REFUND_IP`, dùng chung với Refund, không dùng IP buyer hay header chuyển tiếp. Phải nghiệm thu với IP đã đăng ký trong merchant sandbox.
 - Chỉ phản hồi QueryDR loại thanh toán `01` được đưa vào xử lý đơn. Kết quả hoàn tiền `02`/`03` không được dùng để cấp vé.
 
 #### `GET /api/v1/payments/vnpay/ipn`
@@ -548,6 +549,7 @@ Endpoint nhận webhook IPN (Instant Payment Notification) từ cổng thanh to�
 - Cần bật `ENABLE_VNPAY_IPN_PROCESSING=true`; mặc định endpoint tắt.
 - Xác minh HMAC-SHA512, merchant, số tiền trước khi cập nhật; khóa order rồi transaction trong cùng transaction DB.
 - IPN thành công đến muộn với đủ metadata: khôi phục toàn bộ vé nếu còn trống; nếu không đủ kho thì rollback phần khôi phục và chuyển đơn sang `PAYMENT_EXPIRED_REFUND_PENDING`, tạo một refund cùng sự kiện outbox `REFUND_REQUESTED`. Không gọi API hoàn tiền trong transaction DB.
+- IPN thành công đã xác minh trên đơn `CANCELLED` hoặc đơn chưa thanh toán của sự kiện `SUSPENDED`/`CANCELLED` tạo hoàn tiền tự động, không phục hồi/cấp vé. `SUSPENDED` là trạng thái sự kiện. Callback lặp không tạo refund thứ hai.
 - Giao dịch cũ thiếu ngày tạo, mã giao dịch VNPay hoặc ngày thanh toán hợp lệ được giữ ở `MANUAL_REVIEW` để tránh tự động xử lý dựa trên bằng chứng thiếu.
 - Response 200: `{"RspCode": "00", "Message": "Confirm Success"}`; callback lặp trả `02`, sai chữ ký `97`, sai tiền `04`, không có đơn `01`, cần đối soát `99`.
 
@@ -762,29 +764,45 @@ Tra cứu thủ công vé dự phòng bằng mã vé tĩnh 32 ký tự kết h�
 
 Tính trước số tiền hoàn lại theo chính sách trước khi xác nhận.
 
-- Request body: `{ "ticketId": "tkt-uuid" }`
-- Response 200:
+- Header: `Authorization: Bearer <accessToken>`; chỉ BUYER sở hữu đơn được thao tác.
+- Request body: `{ "orderId": "<uuid>", "ticketIds": ["<uuid-ticket>"] }` (1-6 vé khác nhau).
+- Response 201 (trả trực tiếp, không bọc `success/data`):
 
 ```json
 {
-  "success": true,
-  "data": {
-    "ticketPrice": 2500000,
-    "refundPercentage": 70,
-    "refundAmount": 1750000,
-    "feeDeducted": 750000,
-    "policyApplied": "Hủy trước sự kiện 3-7 ngày (hoàn 70%)"
-  }
+  "orderId": "<uuid>",
+  "policyType": "FLEXIBLE",
+  "daysUntilEvent": 10,
+  "refundPercentage": 100,
+  "items": [],
+  "totalRefundAmount": 200000,
+  "totalFeeDeducted": 0
 }
 ```
 
+`items` liệt kê kết quả tính theo từng vé và giá mua đã lưu, có phân bổ voucher. FLEXIBLE hoàn 100% trước 7 ngày, 50% trước 3 ngày; STRICT hoàn 50% trước 14 ngày; NO_REFUND không cho hoàn tự nguyện. Trường hợp không đủ điều kiện trả lỗi, không thu hồi vé trong preview.
+
 #### `POST /api/v1/refund/request`
 
-Gửi yêu cầu hủy vé.
+- Header: `Authorization: Bearer <accessToken>`, `Idempotency-Key: <UUID>`.
+- Request body: `{ "orderId": "<uuid>", "ticketIds": ["<uuid-ticket>"], "reason": "Bận việc đột xuất" }`.
+- Response 201 (trả trực tiếp):
 
-- Header: `Authorization: Bearer <accessToken>`, `Idempotency-Key: <UUID>`
-- Request body: `{ "ticketId": "tkt-uuid", "reason": "Bận việc đột xuất" }`
-- Response 200: `{ "success": true, "data": { "refundId": "ref-uuid", "status": "PROCESSING" } }`
+```json
+{
+  "refundId": "<uuid-refund-dau-tien>",
+  "refundIds": ["<uuid-refund-1>", "<uuid-refund-2>"],
+  "orderId": "<uuid>",
+  "status": "PROCESSING",
+  "refundAmount": 200000,
+  "cancelledTicketCount": 2,
+  "orderStatus": "REFUNDED"
+}
+```
+
+`PROCESSING` ở response xác nhận đã tiếp nhận, chưa chứng minh VNPay đã hoàn tiền. Transaction DB thu hồi các vé, trả kho và tạo một refund PENDING cho mỗi vé cùng một outbox chứa `refundIds`. Worker gom các refund chưa gửi của yêu cầu thành một lần gọi VNPay: `02` khi hoàn toàn bộ số tiền giao dịch gốc, `03` khi hoàn một phần. Refund đã gửi theo cơ chế cũ được đối soát riêng, không gom để gửi lại. Timeout chỉ đối soát QueryDR với request ID đã lưu.
+
+Đơn giữ `PAID` khi chỉ hủy một phần số vé; toàn bộ vé bị hủy thì đơn là `REFUNDED`. Trạng thái tiền thực tế xem ở các refund `COMPLETED`, không suy ra từ trạng thái đơn. Cùng key và payload trả cùng kết quả; cùng key với payload khác trả 409. Thiếu key hoặc payload sai trả 400; khác chủ đơn bị từ chối.
 
 ### Quản trị hệ thống (`/admin`)
 

@@ -50,11 +50,10 @@ export class PaymentController {
   async queryPayment(
     @CurrentUser() user: AuthenticatedUser,
     @Param("orderId", new ParseUUIDPipe()) orderId: string,
-    @Ip() ip: string,
   ) {
     return {
       success: true,
-      data: await this.queryService.query(user.userId, orderId, ip),
+      data: await this.queryService.query(user.userId, orderId),
     };
   }
 }

@@ -40,7 +40,7 @@ export const EnvSchema = z
       .min(100)
       .max(30000)
       .default(5000),
-    VNPAY_REFUND_IP: z.string().default("127.0.0.1"),
+    VNPAY_REFUND_IP: z.union([z.ipv4(), z.ipv6()]).default("127.0.0.1"),
     VNPAY_RETURN_URL: z
       .string()
       .url()

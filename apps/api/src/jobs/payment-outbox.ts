@@ -1,3 +1,5 @@
+import { Logger } from "@nestjs/common";
+import { hasVnpayCredentials } from "../payments/vnpay-config";
 import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { OutboxStatus } from "@tickethub/shared";
@@ -5,7 +7,7 @@ import { env } from "../config/env.config";
 import { db } from "../database/db";
 import { outbox, refunds } from "../database/schema";
 import { VnpayApi } from "../payments/vnpay-api";
-import { processRefund } from "./refund.processor";
+import { processRefundGroup } from "./refund.processor";
 import { sendPaymentEmail } from "./payment-email";
 
 const RefundEventSchema = z.union([
@@ -22,12 +24,7 @@ export async function processPaymentOutboxOnce(
   const enabledTypes: string[] = [];
   if (process.env.ENABLE_PAYMENT_EMAIL === "true" && env.RESEND_API_KEY)
     enabledTypes.push("ORDER_PAID", "REFUND_COMPLETED");
-  if (
-    process.env.ENABLE_VNPAY_REFUNDS === "true" &&
-    env.VNPAY_TMN_CODE !== "TEST_TMN_CODE" &&
-    env.VNPAY_HASH_SECRET !== "TEST_HASH_SECRET" &&
-    env.VNPAY_HASH_SECRET.trim()
-  )
+  if (process.env.ENABLE_VNPAY_REFUNDS === "true" && hasVnpayCredentials())
     enabledTypes.push("REFUND_REQUESTED");
   if (!enabledTypes.length) return false;
   const event = await db.transaction(async (tx) => {
@@ -68,8 +65,7 @@ export async function processPaymentOutboxOnce(
   if (!event) return false;
   try {
     if (event.eventType === "REFUND_REQUESTED") {
-      for (const refundId of RefundEventSchema.parse(event.payload))
-        await processRefund(refundId, api);
+      await processRefundGroup(RefundEventSchema.parse(event.payload), api);
     } else await sendPaymentEmail(event.id, event.eventType, event.payload);
     await db
       .update(outbox)
@@ -86,6 +82,19 @@ export async function processPaymentOutboxOnce(
         ),
       );
   } catch (error) {
+    const errorCode =
+      error instanceof z.ZodError
+        ? "INVALID_EVENT_PAYLOAD"
+        : "PAYMENT_HANDLER_FAILURE";
+    Logger.warn(
+      {
+        eventId: event.id,
+        eventType: event.eventType,
+        retryCount: event.retryCount + 1,
+        errorCode,
+      },
+      "PaymentOutbox",
+    );
     const retries = event.retryCount + 1;
     if (event.eventType === "REFUND_REQUESTED") {
       const parsed = RefundEventSchema.safeParse(event.payload);
@@ -113,8 +122,7 @@ export async function processPaymentOutboxOnce(
         status: retries >= 8 ? OutboxStatus.FAILED : OutboxStatus.PENDING,
         retryCount: retries,
         nextRetryAt: sql`clock_timestamp() + ${Math.min(3600000, 2000 * 2 ** retries)} * interval '1 millisecond'`,
-        errorMessage:
-          error instanceof Error ? error.message : "Payment worker failure",
+        errorMessage: errorCode,
         updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
       })
       .where(

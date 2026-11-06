@@ -112,7 +112,7 @@ Nhân viên/BTC không đủ trạng thái hoặc role vẫn bị 403.
 
 ## Triển khai API và worker
 
-Trên nhánh PR W05, migration riêng là 0006_w05-staff-reporting.sql, sau 0005_w04-provider-integration.sql của W04 và 0000-0004 gốc. Không chạy lại các file migration W04/W05 cũ.
+Trên nhánh PR W05, migration riêng là 0007_w05-staff-reporting.sql, sau 0005_w04-provider-integration.sql của W04 và 0000-0004 gốc. Không chạy lại các file migration W04/W05 cũ.
 Nộp PR W05 sau khi W03 và W04 đã merge vào unstable bản gốc. Nhánh đã kế thừa W04 để giữ một chuỗi migration; PR W05 chỉ nên review delta so với W04.
 API và worker bắt buộc dùng cùng DATABASE_URL và cùng thư mục REPORT_EXPORT_DIR tuyệt đối trên shared volume.
 Production thiếu đường dẫn tuyệt đối sẽ không tạo/tải file. Không dùng thư mục public.
@@ -175,8 +175,8 @@ Thứ tự nộp/merge: W03, W04, W05. Khi PR trước đã merge, cập nhật 
 | Nhánh           | API tests    | Schema DB mới | Migration riêng               |
 | --------------- | ------------ | ------------- | ----------------------------- |
 | W03             | 225/225 PASS | 18 bảng       | Không thêm                    |
-| W04 kế thừa W03 | 242/242 PASS | 18 bảng       | 0005_w04-provider-integration |
-| W05 kế thừa W04 | 261/261 PASS | 21 bảng       | 0006_w05-staff-reporting      |
+| W04 kế thừa W03 | 250/250 PASS | 18 bảng       | 0005_w04-provider-integration |
+| W05 kế thừa W04 | 270/270 PASS | 21 bảng       | 0007_w05-staff-reporting      |
 
 Mỗi nhánh có 28 test web và 35 root PR/CI tests PASS; lint, typecheck, format, doc parity và db:generate đều PASS.
 API build từng nhánh PASS. Kiểm thử dùng DB/Redis riêng. Không có file workflow hoặc gate bị sửa trong diff từng PR.
@@ -186,3 +186,9 @@ Build web toàn dự án vẫn phụ thuộc tải Google Fonts, đã bị chặ
 
 Nếu nhóm squash/rebase PR trước khi merge, cần fetch và merge upstream/unstable mới vào nhánh kế tiếp
 để GitHub tính lại diff. Không cần force-push. Các nhánh cũ giữ tên để PR đang mở tự nhận commit mới.
+
+## Đồng bộ review thanh toán W04
+
+Chuỗi mới: 0000-0004 gốc, 0005_w04-provider-integration, 0006_w04-refund-groups, 0007_w05-staff-reporting. Snapshot 0006 giữ 18 bảng và snapshot 0007 có 21 bảng. Không sửa journal trong DB hoặc reset dữ liệu. Với DB đã chạy bản W05 0006 cũ, migrate áp dụng cột nhóm refund và chạy lại phần tạo báo cáo theo IF NOT EXISTS; test riêng kiểm tra staff, job export, log bất biến, refund đang xử lý và MV không mất dữ liệu.
+
+Test HTTP W04 trên nhánh W05 kiểm tra thêm báo cáo sau hoàn nhóm ba vé 100% và 50%, bảo đảm không nhân số tiền hoặc đếm trùng nhóm. Dùng `pnpm --filter @tickethub/api test:isolated` để migrate/seed, chạy toàn bộ suite và dọn cả DB tạm, gồm audit log. Chỉ dùng DATABASE_URL của DB test có quyền CREATE DATABASE. Trước deploy dừng payment worker cũ, migrate, khởi động worker mới; không chạy song song worker cũ và mới trên cùng hàng đợi refund.
