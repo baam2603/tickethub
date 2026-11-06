@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { BookingService } from "../src/booking/booking.service";
-import type { WaitingRoomService } from "../src/waiting-room/waiting-room.service";
 import { PaymentService } from "../src/payments/payment.service";
 import { VnpayGateway } from "../src/payments/vnpay.gateway";
 import type { EventReadCacheService } from "../src/events/event-read-cache.service";
@@ -351,7 +350,7 @@ if (!isSafeTestDb) {
 
     const ipn = serviceWithVerifiedCallback(fixture.transactionRef, true);
 
-    const booking = new BookingService({} as WaitingRoomService, cacheStub);
+    const booking = new BookingService(cacheStub);
 
     const [paymentResult, releaseResult] = await Promise.allSettled([
       ipn.process({
@@ -394,7 +393,7 @@ if (!isSafeTestDb) {
   });
 
   test("IPN vs Booking Cleanup: expired order never becomes PAID", async () => {
-    const booking = new BookingService({} as WaitingRoomService, cacheStub);
+    const booking = new BookingService(cacheStub);
 
     // Don cac hold da het han cua cac test truoc.
     await booking.cleanExpiredOrders();
@@ -717,7 +716,7 @@ if (!isSafeTestDb) {
     // 1. Tao mot don hang GA da het han
     const fixture = await createFixture(true);
 
-    const booking = new BookingService({} as WaitingRoomService, cacheStub);
+    const booking = new BookingService(cacheStub);
 
     // 2. Cleanup chay truoc khi VNPay callback
     await booking.cleanExpiredOrders();

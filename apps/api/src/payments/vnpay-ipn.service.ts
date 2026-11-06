@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import {
@@ -27,14 +27,20 @@ import { toVnpayAmount } from "./vnpay-amount";
 import { decideVnpayIpn, type IpnDecision } from "./vnpay-ipn.decision";
 
 import { EventReadCacheService } from "../events/event-read-cache.service";
+import { SeatStreamService } from "../events/seat-stream.service";
 
 @Injectable()
 export class VnpayIpnService {
   private readonly gateway = new VnpayGateway();
 
   constructor(
+    @Optional()
     @Inject(EventReadCacheService)
-    private readonly eventReadCacheService: EventReadCacheService,
+    private readonly eventReadCacheService?: EventReadCacheService,
+
+    @Optional()
+    @Inject(SeatStreamService)
+    private readonly seatStreamService?: SeatStreamService,
   ) {}
 
   async process(params: Record<string, string>): Promise<IpnDecision> {
@@ -360,7 +366,27 @@ export class VnpayIpnService {
         .limit(1);
 
       if (affectedOrder) {
-        await this.eventReadCacheService.invalidate(affectedOrder.eventId);
+        await this.eventReadCacheService?.invalidate(affectedOrder.eventId);
+
+        const orderItemRows = await db
+          .select({ seatId: orderItems.seatId })
+          .from(orderItems)
+          .where(eq(orderItems.orderId, existing.orderId));
+
+        const seatIds = orderItemRows
+          .map((r) => r.seatId)
+          .filter((id): id is string => id !== null && id !== undefined);
+
+        if (seatIds.length > 0) {
+          await this.seatStreamService?.publishSeatStatusChanged(
+            affectedOrder.eventId,
+            {
+              seatIds,
+              status: decision === "APPLY_SUCCESS" ? "SOLD" : "AVAILABLE",
+              expiresAt: null,
+            },
+          );
+        }
       }
     }
 

@@ -1,11 +1,8 @@
 import type { HttpErrorLike } from "./helpers/http-error";
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import Redis from "ioredis";
 import { eq, inArray } from "drizzle-orm";
-import { JwtService } from "@nestjs/jwt";
 import { BookingService } from "../src/booking/booking.service";
-import { WaitingRoomService } from "../src/waiting-room/waiting-room.service";
 import { db, sqlClient } from "../src/database/db";
 import type { EventReadCacheService } from "../src/events/event-read-cache.service";
 import {
@@ -24,16 +21,12 @@ import {
   RefundPolicyType,
   SeatStatus,
 } from "@tickethub/shared";
-import { env } from "../src/config/env.config";
 
 const cacheStub = {
   invalidate: async (_eventId: string): Promise<void> => {},
 } as EventReadCacheService;
 
 describe("Auto Seat Allocation (UC04) Integration Tests", () => {
-  let redis: Redis;
-  let jwtService: JwtService;
-  let waitingRoomService: WaitingRoomService;
   let bookingService: BookingService;
 
   let testBuyerIds: string[] = [];
@@ -43,10 +36,7 @@ describe("Auto Seat Allocation (UC04) Integration Tests", () => {
   let concurrencyTicketTypeId = "";
 
   before(async () => {
-    redis = new Redis(env.REDIS_URL);
-    jwtService = new JwtService({ secret: env.JWT_SECRET });
-    waitingRoomService = new WaitingRoomService(redis, jwtService);
-    bookingService = new BookingService(waitingRoomService, cacheStub);
+    bookingService = new BookingService(cacheStub);
 
     // 1. Tao organizer profile
     let orgProfile = await db.query.organizerProfiles.findFirst();
@@ -113,7 +103,6 @@ describe("Auto Seat Allocation (UC04) Integration Tests", () => {
         endTime,
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();
@@ -238,8 +227,6 @@ describe("Auto Seat Allocation (UC04) Integration Tests", () => {
   });
 
   after(async () => {
-    redis.disconnect();
-
     // Don dep database
     if (testEventId) {
       await db

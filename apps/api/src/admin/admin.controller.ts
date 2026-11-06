@@ -8,6 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -25,6 +26,9 @@ import {
 
 import {
   ApproveActionSchema,
+  AuditLogQuerySchema,
+  EventKillSwitchRequestSchema,
+  EventResumeRequestSchema,
   RejectActionSchema,
   ReviewEventSchema,
   ReviewOrganizerSchema,
@@ -307,6 +311,109 @@ export class AdminController {
       result.data,
       extractAuditMeta(req),
     );
+
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  // POST /api/v1/admin/events/:id/kill-switch
+  // Kích hoạt ngắt khẩn cấp sự kiện vi phạm
+  @Post("events/:id/kill-switch")
+  @HttpCode(HttpStatus.OK)
+  async activateKillSwitch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ) {
+    const result = EventKillSwitchRequestSchema.safeParse(body);
+
+    if (!result.success) {
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Dữ liệu kích hoạt Kill Switch không hợp lệ",
+          details: result.error.format(),
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
+    const data = await this.adminService.activateKillSwitch(
+      id,
+      user.userId,
+      result.data,
+      extractAuditMeta(req),
+    );
+
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  // POST /api/v1/admin/events/:id/resume
+  // Khôi phục sự kiện bị đình chỉ trở lại mở bán
+  @Post("events/:id/resume")
+  @HttpCode(HttpStatus.OK)
+  async resumeEvent(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ) {
+    const result = EventResumeRequestSchema.safeParse(body);
+
+    if (!result.success) {
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Dữ liệu khôi phục sự kiện không hợp lệ",
+          details: result.error.format(),
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
+    const data = await this.adminService.resumeEvent(
+      id,
+      user.userId,
+      result.data,
+      extractAuditMeta(req),
+    );
+
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  // GET /api/v1/admin/events/:id/audit-logs
+  // Truy vấn nhật ký kiểm toán bất biến theo sự kiện có phân trang
+  @Get("events/:id/audit-logs")
+  async getEventAuditLogs(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Query() query: unknown,
+  ) {
+    const result = AuditLogQuerySchema.safeParse(query);
+
+    if (!result.success) {
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Tham số truy vấn audit log không hợp lệ",
+          details: result.error.format(),
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
+    const data = await this.adminService.getEventAuditLogs(id, result.data);
 
     return {
       success: true,
