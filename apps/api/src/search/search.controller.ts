@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Controller,
   Get,
+  Inject,
   Query,
   UseGuards,
 } from "@nestjs/common";
@@ -13,7 +14,9 @@ import { SearchRateLimitGuard } from "./guards/search-rate-limit.guard";
 @Controller("api/v1/search")
 @UseGuards(SearchRateLimitGuard)
 export class SearchController {
-  constructor(private readonly searchService: SearchService) {}
+  constructor(
+    @Inject(SearchService) private readonly searchService: SearchService,
+  ) {}
 
   @Get("events")
   async searchEvents(@Query() query: unknown) {

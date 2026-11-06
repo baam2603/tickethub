@@ -1,10 +1,10 @@
 import {
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
   ConflictException,
   BadRequestException,
-  ForbiddenException,
 } from "@nestjs/common";
 import { sql, eq, and, or, lt, inArray, asc } from "drizzle-orm";
 import crypto from "crypto";
@@ -25,8 +25,8 @@ import {
   SeatStatus,
   AllocatedSeatItem,
 } from "@tickethub/shared";
-import { WaitingRoomService } from "../waiting-room/waiting-room.service";
 import { EventReadCacheService } from "../events/event-read-cache.service";
+import { SeatStreamService } from "../events/seat-stream.service";
 
 interface CandidateSeat {
   id: string;
@@ -99,18 +99,15 @@ function findContiguousSeats(
 @Injectable()
 export class BookingService {
   constructor(
-    @Inject(WaitingRoomService)
-    private readonly waitingRoomService: WaitingRoomService,
-
     @Inject(EventReadCacheService)
     private readonly eventReadCacheService: EventReadCacheService,
+
+    @Optional()
+    @Inject(SeatStreamService)
+    private readonly seatStreamService?: SeatStreamService,
   ) {}
 
-  async holdSeats(
-    userId: string,
-    dto: HoldSeatsRequest,
-    admissionToken?: string,
-  ) {
+  async holdSeats(userId: string, dto: HoldSeatsRequest) {
     const event = await db.query.events.findFirst({
       where: eq(events.id, dto.eventId),
     });
@@ -135,39 +132,6 @@ export class BookingService {
           timestamp: new Date().toISOString(),
         },
       });
-    }
-
-    // Kiểm tra hàng chờ ảo nếu sự kiện yêu cầu
-    if (event.isWaitingRoomEnabled) {
-      if (!admissionToken) {
-        throw new ForbiddenException({
-          success: false,
-          error: {
-            code: "MISSING_ADMISSION_TOKEN",
-            message:
-              "Sự kiện đang bật hàng chờ ảo, yêu cầu header X-Admission-Token",
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-
-      const isValidToken = await this.waitingRoomService.verifyAdmissionToken(
-        admissionToken,
-        dto.eventId,
-        userId,
-      );
-
-      if (!isValidToken) {
-        throw new ForbiddenException({
-          success: false,
-          error: {
-            code: "INVALID_ADMISSION_TOKEN",
-            message:
-              "Mã lượt hàng chờ ảo không hợp lệ hoặc đã hết hạn (X-Admission-Token)",
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
     }
 
     // Kiểm tra tổng số lượng vé đặt (tối đa 6 vé)
@@ -637,6 +601,14 @@ export class BookingService {
     // Chi xoa cache sau khi PostgreSQL commit thanh cong
     await this.eventReadCacheService.invalidate(dto.eventId);
 
+    if (result.heldSeats && result.heldSeats.length > 0) {
+      await this.seatStreamService?.publishSeatStatusChanged(dto.eventId, {
+        seatIds: result.heldSeats,
+        status: "HELD",
+        expiresAt: result.holdExpiresAt,
+      });
+    }
+
     return result;
   }
 
@@ -740,6 +712,19 @@ export class BookingService {
     // Sau khi huy giu ve thanh cong
     await this.eventReadCacheService.invalidate(order.eventId);
 
+    if (order.items && order.items.length > 0) {
+      const seatIds = order.items
+        .map((item) => item.seatId)
+        .filter((id): id is string => id !== null && id !== undefined);
+      if (seatIds.length > 0) {
+        await this.seatStreamService?.publishSeatStatusChanged(order.eventId, {
+          seatIds,
+          status: "AVAILABLE",
+          expiresAt: null,
+        });
+      }
+    }
+
     return result;
   }
 
@@ -814,7 +799,7 @@ export class BookingService {
       );
       if (expiredOrders.length === 0) {
         // Vẫn dọn các ghế rác nếu có trạng thái HELD mà quá hạn
-        await tx
+        const releasedSeatRecords = await tx
           .update(seats)
           .set({
             status: SeatStatus.AVAILABLE,
@@ -828,10 +813,12 @@ export class BookingService {
               eq(seats.status, SeatStatus.HELD),
               lt(seats.holdExpiresAt, now),
             ),
-          );
+          )
+          .returning({ id: seats.id, eventId: seats.eventId });
         return {
           expiredOrdersCount: 0,
           affectedEventIds,
+          releasedSeatRecords,
         };
       }
 
@@ -844,7 +831,7 @@ export class BookingService {
         .where(inArray(orders.id, expiredOrderIds));
 
       // Giải phóng ghế thuộc các đơn hết hạn
-      await tx
+      const releasedSeatRecords = await tx
         .update(seats)
         .set({
           status: SeatStatus.AVAILABLE,
@@ -861,7 +848,8 @@ export class BookingService {
               lt(seats.holdExpiresAt, now),
             ),
           ),
-        );
+        )
+        .returning({ id: seats.id, eventId: seats.eventId });
 
       // Hoàn trả held_count cho vé đứng thuộc các đơn hết hạn
       const standingOrderItems = await tx
@@ -890,6 +878,7 @@ export class BookingService {
       return {
         expiredOrdersCount: expiredOrderIds.length,
         affectedEventIds,
+        releasedSeatRecords,
       };
     });
     await Promise.all(
@@ -897,6 +886,22 @@ export class BookingService {
         this.eventReadCacheService.invalidate(eventId),
       ),
     );
+
+    if (result.releasedSeatRecords && result.releasedSeatRecords.length > 0) {
+      const seatsByEvent = new Map<string, string[]>();
+      for (const s of result.releasedSeatRecords) {
+        const list = seatsByEvent.get(s.eventId) || [];
+        list.push(s.id);
+        seatsByEvent.set(s.eventId, list);
+      }
+      for (const [eventId, seatIds] of seatsByEvent.entries()) {
+        await this.seatStreamService?.publishSeatStatusChanged(eventId, {
+          seatIds,
+          status: "AVAILABLE",
+          expiresAt: null,
+        });
+      }
+    }
 
     return {
       expiredOrdersCount: result.expiredOrdersCount,

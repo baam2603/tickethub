@@ -1,3 +1,4 @@
+import { and, eq, sql } from "drizzle-orm";
 import { db, sqlClient } from "./db";
 import {
   users,
@@ -7,6 +8,8 @@ import {
   seats,
   gates,
   eventStaff,
+  venues,
+  venueLayouts,
 } from "./schema";
 import {
   UserRole,
@@ -76,7 +79,10 @@ async function seed() {
     .onConflictDoNothing();
 
   if (!organizerUser) {
-    console.log("Seed data already present. Skipping insertion.");
+    console.log(
+      "Core seed already present. Updating missing venue catalog only.",
+    );
+    await seedCuratedVenues();
     await sqlClient.end();
     return;
   }
@@ -126,8 +132,6 @@ async function seed() {
       endTime,
       gateOpeningTime,
       status: EventStatus.PUBLISHED,
-      isWaitingRoomEnabled: false,
-      maxActiveUsers: 200,
       refundPolicyType: RefundPolicyType.FLEXIBLE,
       refundPolicyRules: [
         { hoursBeforeStart: 72, refundRate: 100 },
@@ -235,8 +239,191 @@ async function seed() {
     });
   }
 
+  // 8. Curated Venues & Layouts
+  await seedCuratedVenues();
+
   console.log("Database seeded successfully.");
   await sqlClient.end();
+}
+
+async function seedCuratedVenues() {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(7045545)`);
+    async function ensureVenue(input: typeof venues.$inferInsert) {
+      const existing = await tx.query.venues.findFirst({
+        where: and(eq(venues.name, input.name), eq(venues.city, input.city)),
+      });
+      if (existing) return existing;
+      const [created] = await tx.insert(venues).values(input).returning();
+      return created!;
+    }
+    async function ensureLayouts(inputs: (typeof venueLayouts.$inferInsert)[]) {
+      for (const input of inputs) {
+        if (!input.mapKey) throw new Error("Seed layout requires mapKey");
+        const existing = await tx.query.venueLayouts.findFirst({
+          where: and(
+            eq(venueLayouts.venueId, input.venueId),
+            eq(venueLayouts.mapKey, input.mapKey),
+          ),
+        });
+        if (!existing) await tx.insert(venueLayouts).values(input);
+      }
+    }
+    console.log("Seeding Curated Venues and SVG layouts...");
+    const myDinh = await ensureVenue({
+      name: "Sân vận động Quốc gia Mỹ Đình",
+      shortName: "SVĐ Mỹ Đình",
+      city: "Hà Nội",
+      district: "Nam Từ Liêm",
+      address: "Đường Lê Đức Thọ, Phường Mỹ Đình 1, Nam Từ Liêm, Hà Nội",
+      category: "stadium",
+      totalCapacity: "40,192",
+      thumbnailUrl: "/images/venues/my-dinh.webp",
+      description:
+        "Sân vận động quốc gia trọng điểm phục vụ đại nhạc hội và thi đấu thể thao quốc tế.",
+    });
+
+    const phuTho = await ensureVenue({
+      name: "Nhà thi đấu Thể dục Thể thao Phú Thọ",
+      shortName: "NTĐ Phú Thọ",
+      city: "TP. Hồ Chí Minh",
+      district: "Quận 11",
+      address: "Số 1 Lữ Gia, Phường 15, Quận 11, TP. Hồ Chí Minh",
+      category: "arena",
+      totalCapacity: "8,000",
+      thumbnailUrl: "/images/venues/phu-tho.webp",
+      description: "Nhà thi đấu đa năng hiện đại hàng đầu khu vực phía Nam.",
+    });
+
+    const tienSon = await ensureVenue({
+      name: "Cung Thể thao Tiên Sơn",
+      shortName: "Cung TT Tiên Sơn",
+      city: "Đà Nẵng",
+      district: "Hải Châu",
+      address: "Phan Đăng Lưu, Phường Hòa Cường Bắc, Quận Hải Châu, Đà Nẵng",
+      category: "sports",
+      totalCapacity: "6,500",
+      thumbnailUrl: "/images/venues/tien-son.webp",
+      description: "Cung thể thao Đĩa Bay hiện đại bậc nhất miền Trung.",
+    });
+
+    if (myDinh) {
+      await ensureLayouts([
+        {
+          venueId: myDinh.id,
+          name: "Sân Khấu Chữ T (Live Concert T-Stage)",
+          categoryName: "Live Concert",
+          capacityEstimate: "25,000 - 30,000",
+          mapKey: "my-dinh-concert-t-stage",
+          svgContent:
+            '<svg viewBox="0 0 1000 800"><rect width="1000" height="800" fill="#18181b"/><text x="500" y="400" fill="#fff" text-anchor="middle">Sơ đồ Sân Khấu Chữ T - Mỹ Đình</text></svg>',
+          defaultZones: [
+            {
+              zoneName: "VVIP Khán Đài A",
+              color: "#E5A93C",
+              price: 3500000,
+              capacity: 1500,
+            },
+            {
+              zoneName: "VIP Khán Đài B",
+              color: "#A855F7",
+              price: 2500000,
+              capacity: 3000,
+            },
+            {
+              zoneName: "GA Fanzone Sân Cỏ",
+              color: "#3B82F6",
+              price: 1200000,
+              capacity: 8000,
+            },
+          ],
+          isDefault: true,
+        },
+        {
+          venueId: myDinh.id,
+          name: "Mega Concert Sân Vận Động (Toàn Sân)",
+          categoryName: "Mega Concert",
+          capacityEstimate: "35,000 - 40,000",
+          mapKey: "my-dinh-mega-stadium",
+          svgContent:
+            '<svg viewBox="0 0 1000 800"><rect width="1000" height="800" fill="#18181b"/><text x="500" y="400" fill="#fff" text-anchor="middle">Sơ đồ Toàn Sân - Mỹ Đình</text></svg>',
+          defaultZones: [
+            {
+              zoneName: "VIP Khán Đài",
+              color: "#E5A93C",
+              price: 3000000,
+              capacity: 5000,
+            },
+            {
+              zoneName: "Standard Tầng 2",
+              color: "#10B981",
+              price: 1500000,
+              capacity: 15000,
+            },
+          ],
+          isDefault: false,
+        },
+      ]);
+    }
+
+    if (phuTho) {
+      await ensureLayouts([
+        {
+          venueId: phuTho.id,
+          name: "Live Concert Sân Khấu Trung Tâm (360 Arena)",
+          categoryName: "Live Concert",
+          capacityEstimate: "6,000 - 7,500",
+          mapKey: "phu-tho-center-stage",
+          svgContent:
+            '<svg viewBox="0 0 800 600"><rect width="800" height="600" fill="#18181b"/><text x="400" y="300" fill="#fff" text-anchor="middle">Sơ đồ 360 Arena - Phú Thọ</text></svg>',
+          defaultZones: [
+            {
+              zoneName: "VIP Sàn Đấu",
+              color: "#E5A93C",
+              price: 2200000,
+              capacity: 1000,
+            },
+            {
+              zoneName: "Khán Đài Tầng 1",
+              color: "#3B82F6",
+              price: 1200000,
+              capacity: 3500,
+            },
+          ],
+          isDefault: true,
+        },
+      ]);
+    }
+
+    if (tienSon) {
+      await ensureLayouts([
+        {
+          venueId: tienSon.id,
+          name: "Đêm Nhạc Hội Khán Phòng Arena",
+          categoryName: "Arena Concert",
+          capacityEstimate: "5,000",
+          mapKey: "tien-son-arena",
+          svgContent:
+            '<svg viewBox="0 0 800 600"><rect width="800" height="600" fill="#18181b"/><text x="400" y="300" fill="#fff" text-anchor="middle">Sơ đồ Arena - Tiên Sơn</text></svg>',
+          defaultZones: [
+            {
+              zoneName: "VIP A",
+              color: "#E5A93C",
+              price: 1800000,
+              capacity: 800,
+            },
+            {
+              zoneName: "Khán Đài B",
+              color: "#3B82F6",
+              price: 900000,
+              capacity: 2500,
+            },
+          ],
+          isDefault: true,
+        },
+      ]);
+    }
+  });
 }
 
 seed().catch((err) => {

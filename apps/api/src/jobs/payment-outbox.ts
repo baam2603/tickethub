@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lte, or } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { OutboxStatus } from "@tickethub/shared";
 import { env } from "../config/env.config";
@@ -8,6 +8,12 @@ import { VnpayApi } from "../payments/vnpay-api";
 import { processRefund } from "./refund.processor";
 import { sendPaymentEmail } from "./payment-email";
 
+const RefundEventSchema = z.union([
+  z.object({ refundId: z.string().uuid() }).transform((v) => [v.refundId]),
+  z
+    .object({ refundIds: z.array(z.string().uuid()).min(1).max(100) })
+    .transform((v) => [...new Set(v.refundIds)]),
+]);
 export async function processPaymentOutboxOnce(
   api: VnpayApi,
   targetId?: string,
@@ -32,12 +38,15 @@ export async function processPaymentOutboxOnce(
         and(
           targetId ? eq(outbox.id, targetId) : undefined,
           inArray(outbox.eventType, enabledTypes),
-          lte(outbox.nextRetryAt, new Date()),
+          lte(outbox.nextRetryAt, sql`clock_timestamp()`),
           or(
             eq(outbox.status, OutboxStatus.PENDING),
             and(
               eq(outbox.status, OutboxStatus.PROCESSING),
-              lte(outbox.updatedAt, new Date(Date.now() - 300000)),
+              lte(
+                outbox.updatedAt,
+                sql`clock_timestamp() - interval '5 minutes'`,
+              ),
             ),
           ),
         ),
@@ -46,62 +55,75 @@ export async function processPaymentOutboxOnce(
       .limit(1)
       .for("update", { skipLocked: true });
     if (!found) return null;
-    await tx
+    const [claimed] = await tx
       .update(outbox)
-      .set({ status: OutboxStatus.PROCESSING, updatedAt: new Date() })
-      .where(eq(outbox.id, found.id));
-    return found;
+      .set({
+        status: OutboxStatus.PROCESSING,
+        updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
+      })
+      .where(eq(outbox.id, found.id))
+      .returning();
+    return claimed!;
   });
   if (!event) return false;
   try {
     if (event.eventType === "REFUND_REQUESTED") {
-      const { refundId } = z
-        .object({ refundId: z.string().uuid() })
-        .parse(event.payload);
-      await processRefund(refundId, api);
+      for (const refundId of RefundEventSchema.parse(event.payload))
+        await processRefund(refundId, api);
     } else await sendPaymentEmail(event.id, event.eventType, event.payload);
     await db
       .update(outbox)
       .set({
         status: OutboxStatus.COMPLETED,
         errorMessage: null,
-        updatedAt: new Date(),
+        updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
       })
-      .where(eq(outbox.id, event.id));
+      .where(
+        and(
+          eq(outbox.id, event.id),
+          eq(outbox.status, OutboxStatus.PROCESSING),
+          eq(outbox.updatedAt, event.updatedAt),
+        ),
+      );
   } catch (error) {
     const retries = event.retryCount + 1;
     if (event.eventType === "REFUND_REQUESTED") {
-      const parsed = z
-        .object({ refundId: z.string().uuid() })
-        .safeParse(event.payload);
+      const parsed = RefundEventSchema.safeParse(event.payload);
       if (parsed.success)
         await db
           .update(refunds)
           .set({
-            nextRetryAt: new Date(
-              Date.now() + Math.min(3600000, 2000 * 2 ** retries),
-            ),
+            nextRetryAt: sql`clock_timestamp() + ${Math.min(3600000, 2000 * 2 ** retries)} * interval '1 millisecond'`,
             errorMessage:
               retries >= 8
                 ? "MANUAL_RECONCILIATION_REQUIRED"
                 : "PROVIDER_RESULT_REQUIRES_CONFIRMATION",
-            updatedAt: new Date(),
+            updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
           })
-          .where(eq(refunds.id, parsed.data.refundId));
+          .where(
+            and(
+              inArray(refunds.id, parsed.data),
+              inArray(refunds.status, ["PENDING", "PROCESSING"]),
+            ),
+          );
     }
     await db
       .update(outbox)
       .set({
         status: retries >= 8 ? OutboxStatus.FAILED : OutboxStatus.PENDING,
         retryCount: retries,
-        nextRetryAt: new Date(
-          Date.now() + Math.min(3600000, 2000 * 2 ** retries),
-        ),
+        nextRetryAt: sql`clock_timestamp() + ${Math.min(3600000, 2000 * 2 ** retries)} * interval '1 millisecond'`,
         errorMessage:
           error instanceof Error ? error.message : "Payment worker failure",
-        updatedAt: new Date(),
+        updatedAt: sql`date_trunc('milliseconds', clock_timestamp())`,
       })
-      .where(eq(outbox.id, event.id));
+      .where(
+        and(
+          eq(outbox.id, event.id),
+          eq(outbox.status, OutboxStatus.PROCESSING),
+          eq(outbox.updatedAt, event.updatedAt),
+        ),
+      );
   }
   return true;
 }

@@ -1,5 +1,5 @@
-import { Inject, Injectable } from "@nestjs/common";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { and, eq, gte, sql, inArray } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import {
   OrderStatus,
@@ -30,14 +30,20 @@ import { toVnpayAmount } from "./vnpay-amount";
 import { decideVnpayIpn, type IpnDecision } from "./vnpay-ipn.decision";
 
 import { EventReadCacheService } from "../events/event-read-cache.service";
+import { SeatStreamService } from "../events/seat-stream.service";
 
 @Injectable()
 export class VnpayIpnService {
   private readonly gateway = new VnpayGateway();
 
   constructor(
+    @Optional()
     @Inject(EventReadCacheService)
-    private readonly eventReadCacheService: EventReadCacheService,
+    private readonly eventReadCacheService?: EventReadCacheService,
+
+    @Optional()
+    @Inject(SeatStreamService)
+    private readonly seatStreamService?: SeatStreamService,
   ) {}
 
   async process(params: Record<string, string>): Promise<IpnDecision> {
@@ -400,7 +406,41 @@ export class VnpayIpnService {
         .limit(1);
 
       if (affectedOrder) {
-        await this.eventReadCacheService.invalidate(affectedOrder.eventId);
+        await this.eventReadCacheService?.invalidate(affectedOrder.eventId);
+
+        const orderItemRows = await db
+          .select({ seatId: orderItems.seatId })
+          .from(orderItems)
+          .where(eq(orderItems.orderId, existing.orderId));
+
+        const seatIds = orderItemRows
+          .map((r) => r.seatId)
+          .filter((id): id is string => id !== null && id !== undefined);
+
+        if (seatIds.length > 0) {
+          // IPN muon co the mat ghe vao tay don khac. Phat trang thai DB that,
+          // khong gan AVAILABLE chi vi don cu duoc dua vao hang doi hoan tien.
+          const currentSeats = await db
+            .select({
+              id: seats.id,
+              status: seats.status,
+              holdExpiresAt: seats.holdExpiresAt,
+            })
+            .from(seats)
+            .where(inArray(seats.id, seatIds));
+          for (const seat of currentSeats)
+            await this.seatStreamService?.publishSeatStatusChanged(
+              affectedOrder.eventId,
+              {
+                seatIds: [seat.id],
+                status: seat.status,
+                expiresAt:
+                  seat.status === SeatStatus.HELD
+                    ? (seat.holdExpiresAt?.toISOString() ?? null)
+                    : null,
+              },
+            );
+        }
       }
     }
 

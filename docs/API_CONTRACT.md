@@ -57,7 +57,6 @@ Thất bại (`HTTP 4xx` hoặc `5xx`):
 | `NOT_FOUND`              | 404         | Tài nguyên không tồn tại                                 |
 | `SEAT_ALREADY_HELD`      | 409         | Ghế đã có người giữ hoặc đã bán                          |
 | `CONFLICT_VERSION`       | 409         | Xung đột phiên bản dữ liệu khi cập nhật đồng thời        |
-| `WAITING_ROOM_REQUIRED`  | 428         | Sự kiện đang bật hàng chờ, thiếu admission token         |
 | `TOO_MANY_REQUESTS`      | 429         | Gửi yêu cầu vượt quá giới hạn tần suất cho phép          |
 | `INTERNAL_SERVER_ERROR`  | 500         | Lỗi xử lý nội bộ phía máy chủ                            |
 
@@ -307,9 +306,9 @@ Lấy thông tin tồn kho và số lượng vé còn lại của từng hạng 
   }
   ```
 
-#### `GET /api/v1/events/:id/seats/stream` (SSE) [PLANNED]
+#### `GET /api/v1/events/:id/seats/stream` (SSE)
 
-Cập nhật trạng thái ghế theo thời gian thực.
+Cập nhật trạng thái ghế theo thời gian thực qua Redis Pub/Sub.
 
 - Tên sự kiện: `seat_status_changed`
 - Dữ liệu gửi về:
@@ -322,9 +321,9 @@ Cập nhật trạng thái ghế theo thời gian thực.
 }
 ```
 
-### [PLANNED] Địa điểm chuẩn và Sơ đồ SVG (`/venues`)
+### Địa điểm chuẩn và Sơ đồ SVG (`/venues`)
 
-#### [PLANNED] `GET /api/v1/venues`
+#### `GET /api/v1/venues`
 
 Lấy danh mục các địa điểm tổ chức chuẩn (Curated Venues) đã được quản trị viên kiểm duyệt, hỗ trợ lọc theo 3 thành phố lớn, thể loại và tìm kiếm từ khóa.
 
@@ -373,57 +372,17 @@ Lấy danh mục các địa điểm tổ chức chuẩn (Curated Venues) đã �
 }
 ```
 
-#### [PLANNED] `GET /api/v1/venues/:id`
+#### `GET /api/v1/venues/:id`
 
 Lấy chi tiết một địa điểm chuẩn kèm tất cả cấu hình sơ đồ khán đài SVG và phân khu mặc định.
 
 - Response 200: Chi tiết địa điểm và danh sách các layout có sẵn (`layouts` kèm `defaultZones`).
 
-#### [PLANNED] `GET /api/v1/venues/:id/layouts`
+#### `GET /api/v1/venues/:id/layouts`
 
 Lấy danh sách các mẫu sơ đồ khán đài của địa điểm kèm danh sách `defaultZones` tương thích với `data-zone` trong tệp SVG.
 
 - Response 200: Danh sách sơ đồ khán đài kiến trúc kèm ước lượng sức chứa và cấu hình phân khu.
-
-### Hàng chờ ảo (`/waiting-room`)
-
-#### `POST /api/v1/waiting-room/:eventId/join`
-
-Gia nhập hàng chờ trước khi vào màn hình giữ chỗ và mua vé.
-
-- Header: `Authorization: Bearer <accessToken>`
-- Response 200 (khi số người mua vé đồng thời còn dưới ngưỡng `MAX_ACTIVE`):
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "ADMITTED",
-    "admissionToken": "jwt_token_valid_10_minutes"
-  }
-}
-```
-
-- Response 202 (khi phải xếp hàng):
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "QUEUED",
-    "queuePosition": 142,
-    "estimatedWaitSeconds": 90,
-    "queueId": "q_user_uuid_event_uuid"
-  }
-}
-```
-
-#### `POST /api/v1/waiting-room/:eventId/heartbeat`
-
-Gửi tín hiệu duy trì vị trí hàng chờ mỗi 15 giây.
-
-- Request body: `{ "queueId": "q_user_uuid_event_uuid" }`
-- Response 200: `{ "success": true, "data": { "queuePosition": 120, "estimatedWaitSeconds": 75 } }`
 
 ### Đặt và giữ chỗ vé (`/booking`)
 
@@ -435,7 +394,6 @@ Giữ chỗ vé trong thời hạn 5 phút với cơ chế tự động phân b�
 - Header:
   - `Authorization: Bearer <accessToken>`
   - `Idempotency-Key: <UUID>`
-  - `X-Admission-Token: <token>` (khi sự kiện bật hàng chờ)
 - Cơ chế phân bổ: Người mua chọn hạng vé (`ticketTypeId`) và số lượng vé (`quantity`). Hệ thống tự động tìm và cấp các ghế còn trống liền kề trong cùng một hàng. Nếu hàng bị phân mảnh, hệ thống tự động quét và ưu tiên hàng có đủ ghế liền kề tiếp theo trong cùng hạng vé.
 - Request body:
 
@@ -526,6 +484,31 @@ Xem chi tiết đơn hàng giữ chỗ hiện tại và thời gian đếm ngư�
     }
   }
   ```
+
+### Quản lý đơn hàng người mua (`/buyer/orders`)
+
+#### `GET /api/v1/buyer/orders`
+
+Lấy danh sách lịch sử đơn hàng của người mua đang đăng nhập.
+
+- Quyền: `BUYER`, `ADMIN`
+- Header: `Authorization: Bearer <accessToken>`
+- Query params:
+  - `page` (optional, mặc định: 1)
+  - `limit` (optional, mặc định: 10, tối đa: 50)
+  - `status` (optional: `PENDING`, `PAID`, `CANCELLED`, `REFUNDED`)
+- Response 200: Danh sách đơn hàng tóm tắt kèm thông tin sự kiện, tổng tiền và số lượng vé.
+
+#### `GET /api/v1/buyer/orders/:id`
+
+Xem chi tiết chuyên sâu của một đơn hàng.
+
+- Quyền: `BUYER` (chỉ xem đơn của chính mình), `ADMIN` (xem mọi đơn hàng)
+- Header: `Authorization: Bearer <accessToken>`
+- Path param: `id` (UUID của đơn hàng)
+- Response 200: Chi tiết đơn hàng, sự kiện, các hạng vé, danh sách vé điện tử kèm vị trí ghế (hoặc GA vé đứng không nhãn N/A), và lịch sử hoàn tiền.
+- Lỗi 403: `ACCESS_DENIED` nếu người dùng không phải chủ sở hữu đơn hàng (ngăn chặn IDOR).
+- Lỗi 404: `ORDER_NOT_FOUND` nếu đơn hàng không tồn tại.
 
 ### Thanh toán VNPay (`/payments`)
 
@@ -625,93 +608,157 @@ Webhook tiếp nhận thông báo kết quả từ cổng VNPay.
   - Sai chữ ký: `{"RspCode": "97", "Message": "Invalid Signature"}`
   - Không tìm thấy đơn: `{"RspCode": "01", "Message": "Order not found"}`
 
-### [PLANNED] Vé điện tử và soát vé (`/tickets` và `/checkin`)
+### Vé điện tử và soát vé (`/tickets` và `/gate`)
 
-#### [PLANNED] `GET /api/v1/tickets/my-tickets`
+#### `GET /api/v1/tickets/my-tickets`
 
 Lấy danh sách vé đã mua của người dùng đăng nhập.
 
+- Quyền: `BUYER`, `ADMIN`
 - Header: `Authorization: Bearer <accessToken>`
-- Response 200: Danh sách vé kèm thông tin sự kiện, vị trí ghế và trạng thái.
+- Query params:
+  - `page` (optional, mặc định: 1)
+  - `limit` (optional, mặc định: 20, tối đa: 100)
+  - `status` (optional: `SOLD`, `CHECKED_IN`, `CANCELLED`; mặc định: chỉ lấy `SOLD` và `CHECKED_IN`)
+  - `eventId` (optional: lọc theo UUID sự kiện)
+- Sắp xếp mặc định: `events.startTime ASC, tickets.id ASC`
+- Response 200: Danh sách vé kèm thông tin sự kiện, vị trí ghế (hoặc GA vé đứng không nhãn N/A) và trạng thái.
 
-#### [PLANNED] `GET /api/v1/tickets/:id/dynamic-qr`
+#### `GET /api/v1/tickets/:id/qr`
 
-Lấy token mã QR động ký số bằng Ed25519 (hiệu lực 30 giây).
+Lấy mã QR động JWT ký số bằng thuật toán Ed25519 (chu kỳ làm mới 30 giây).
 
+- Quyền: `BUYER` (chủ sở hữu vé) hoặc `ADMIN`
 - Header: `Authorization: Bearer <accessToken>`
-- Điều kiện: Vé ở trạng thái `SOLD`, đúng chủ sở hữu và nằm trong khung giờ quy định (từ 2 giờ trước giờ mở cổng đến hết sự kiện).
-- Response 200:
+- Path param: `id` (UUID của vé)
+- Điều kiện: Vé ở trạng thái `SOLD` và sự kiện đang ở trạng thái `PUBLISHED`.
+- Response: `200 OK`
 
 ```json
 {
-  "success": true,
-  "data": {
-    "ticketId": "tkt-uuid",
-    "qrToken": "eyJhbGciOiJFZERTQSI...",
-    "issuedAt": "2026-11-20T17:30:00Z",
-    "expiresAt": "2026-11-20T17:30:30Z",
-    "refreshIntervalSeconds": 25
-  }
+  "ticketId": "3fd0bca3-cea0-4eff-b8aa-76329dfd0e4f",
+  "qrToken": "eyJhbGciOiJFZERTQSI...",
+  "expiresAt": "2026-11-20T17:30:30.000Z",
+  "remainingSeconds": 30
 }
 ```
 
-Nội dung giải mã của `qrToken` (Ed25519 JWS):
+Nội dung giải mã của `qrToken` (Ed25519 JWS Payload):
 
 ```json
 {
-  "sub": "tkt-uuid",
-  "eventId": "e1-uuid",
-  "ticketCode": "TKT-XYZ789",
-  "seat": "Khu VIP A - Hàng A - Ghế 01",
+  "sub": "3fd0bca3-cea0-4eff-b8aa-76329dfd0e4f",
+  "eventId": "071bb3bc-3264-4e42-afb2-20a91282a182",
+  "orderId": "3aff9a01-7078-4e84-9e4f-4857ca03c932",
+  "userId": "165a34d9-64d9-42c7-a9a1-e8034a632f16",
   "iat": 1795195800,
   "exp": 1795195830,
-  "jti": "random_unique_nonce_string"
+  "nonce": "a7b3c2d1-e4f5-6a7b-8c9d-0e1f2a3b4c5d"
 }
 ```
 
-#### [PLANNED] `POST /api/v1/checkin/scan`
+#### `POST /api/v1/gate/scan`
 
-Nhân viên soát vé quét mã QR tại cổng.
+Nhân viên soát vé quét mã QR động tại cổng vào sự kiện. Thực hiện cập nhật trạng thái vé nguyên tử (`SOLD` -> `CHECKED_IN`).
 
+- Quyền: `GATE_STAFF` (được phân công cho sự kiện trong `event_staff`) hoặc `ADMIN`
 - Header: `Authorization: Bearer <staffToken>`
-- Request body: `{ "qrToken": "string", "gateId": "gate-a-uuid" }`
-- Response 200 (vé hợp lệ):
+- Request body:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "status": "VALID",
-    "ticketCode": "TKT-XYZ789",
-    "seat": "Khu VIP A - Hàng A - Ghế 01",
-    "ticketTypeName": "VIP",
-    "checkedInAt": "2026-11-20T18:15:22Z"
-  }
+  "qrToken": "eyJhbGciOiJFZERTQSI...",
+  "gateId": "7b82fe51-4029-4d2c-9a3b-285b001a1d12"
 }
 ```
 
-- Response 409 (vé đã sử dụng hoặc đã hủy):
+- Response: `200 OK` (soát vé thành công)
 
 ```json
 {
-  "success": false,
-  "error": {
-    "code": "TICKET_ALREADY_USED",
-    "message": "Vé này đã được soát lúc 18:02:11 tại Cổng B"
-  }
+  "ticketId": "3fd0bca3-cea0-4eff-b8aa-76329dfd0e4f",
+  "ticketCode": "TK1_c5837da3336143918702fc862f87",
+  "status": "CHECKED_IN",
+  "eventTitle": "Đại Nhạc Hội Mùa Hè 2026",
+  "ticketTypeName": "VIP Diamond",
+  "zoneName": "Khu VIP Diamond",
+  "seatLabel": "Hàng A - Ghế 01",
+  "isSeated": true,
+  "buyerName": "Nguyễn Văn Mua",
+  "checkedInAt": "2026-11-20T18:15:22.000Z",
+  "gateId": "7b82fe51-4029-4d2c-9a3b-285b001a1d12",
+  "staffId": "9a8b7c6d-5e4f-3a2b-1c0d-e9f8a7b6c5d4"
 }
 ```
 
-#### [PLANNED] `POST /api/v1/checkin/manual-search`
+- Response: `409 Conflict` (vé đã được sử dụng trước đó):
 
-Tra cứu vé thủ công khi người mua không mở được mã QR.
+```json
+{
+  "statusCode": 409,
+  "message": "TICKET_ALREADY_USED: Ticket was already checked in at 2026-11-20T18:02:11.000Z by staff 9a8b7c6d-5e4f-3a2b-1c0d-e9f8a7b6c5d4"
+}
+```
 
-- Request body: `{ "eventId": "e1-uuid", "searchQuery": "0912345678" }`
-- Response 200: Danh sách vé phù hợp để nhân viên đối chiếu giấy tờ tùy thân.
+- Response: `403 Forbidden` (nhân viên không được phân công cho sự kiện):
 
-### [PLANNED] Hủy vé và hoàn tiền (`/refund`)
+```json
+{
+  "statusCode": 403,
+  "message": "STAFF_NOT_ASSIGNED_TO_EVENT: Gate staff is not assigned to this event"
+}
+```
 
-#### [PLANNED] `POST /api/v1/refund/preview`
+#### `POST /api/v1/gate/lookup`
+
+Tra cứu thủ công vé dự phòng bằng mã vé tĩnh 32 ký tự kết hợp 4 chữ số cuối của Số điện thoại hoặc Email khi khách gặp sự cố thiết bị (hết pin, vỡ màn hình, mất mạng). Bắt buộc ghi nhận nhật ký kiểm toán bất biến vào `audit_log`.
+
+- Quyền: `GATE_STAFF` (được phân công cho sự kiện) hoặc `ADMIN`
+- Header: `Authorization: Bearer <staffToken>`
+- Request body:
+
+```json
+{
+  "eventId": "071bb3bc-3264-4e42-afb2-20a91282a182",
+  "ticketCode": "LK6_a7b3c2d1e4f56a7b8c9d0e1f2a3b",
+  "phoneOrEmailLast4": "4567",
+  "reason": "Khách hết pin điện thoại tại cổng",
+  "gateId": "7b82fe51-4029-4d2c-9a3b-285b001a1d12"
+}
+```
+
+- Response: `200 OK`
+
+```json
+{
+  "ticketId": "3fd0bca3-cea0-4eff-b8aa-76329dfd0e4f",
+  "ticketCode": "LK6_a7b3c2d1e4f56a7b8c9d0e1f2a3b",
+  "status": "CHECKED_IN",
+  "eventTitle": "Đại Nhạc Hội Mùa Hè 2026",
+  "ticketTypeName": "VIP Diamond",
+  "zoneName": "Khu VIP Diamond",
+  "seatLabel": "Hàng A - Ghế 01",
+  "isSeated": true,
+  "buyerName": "Nguyễn Văn Mua",
+  "checkedInAt": "2026-11-20T18:18:00.000Z",
+  "gateId": "7b82fe51-4029-4d2c-9a3b-285b001a1d12",
+  "staffId": "9a8b7c6d-5e4f-3a2b-1c0d-e9f8a7b6c5d4",
+  "method": "MANUAL_LOOKUP"
+}
+```
+
+- Response: `400 Bad Request` (xác minh 4 số cuối thất bại):
+
+```json
+{
+  "statusCode": 400,
+  "message": "VERIFICATION_FAILED: Last 4 digits of phone or email do not match attendee record"
+}
+```
+
+### Hủy vé và hoàn tiền (`/refund`)
+
+#### `POST /api/v1/refund/preview`
 
 Tính trước số tiền hoàn lại theo chính sách trước khi xác nhận.
 
@@ -731,7 +778,7 @@ Tính trước số tiền hoàn lại theo chính sách trước khi xác nhậ
 }
 ```
 
-#### [PLANNED] `POST /api/v1/refund/request`
+#### `POST /api/v1/refund/request`
 
 Gửi yêu cầu hủy vé.
 
@@ -883,27 +930,164 @@ hoặc
 
 - Response 200: Trả về thông tin sự kiện đã cập nhật.
 
-#### [PLANNED] `POST /api/v1/admin/events/:id/kill-switch`
+#### `POST /api/v1/admin/events/:id/kill-switch`
 
-Kích hoạt dừng khẩn cấp sự kiện vi phạm.
+Kích hoạt dừng khẩn cấp sự kiện vi phạm (Emergency Kill Switch). Chuyển trạng thái sự kiện sang `SUSPENDED`, hủy toàn bộ các đơn hàng chưa thanh toán (`PENDING` sang `CANCELLED`), giải phóng toàn bộ ghế ngồi đang bị giữ (`HELD` sang `AVAILABLE`), reset số lượng giữ vé đứng GA về 0, xóa cache sự kiện trên Redis và ghi nhật ký kiểm toán bất biến `audit_log`.
+
+- Quyền: `ADMIN`
+- Header: `Authorization: Bearer <adminToken>`
+- Request body:
+
+```json
+{
+  "reason": "Phát hiện thông tin giả mạo hoặc sự cố an ninh nghiêm trọng",
+  "version": 1
+}
+```
+
+- Response: `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "eventId": "evt-uuid",
+    "status": "SUSPENDED",
+    "rejectionReason": "Phát hiện thông tin giả mạo hoặc sự cố an ninh nghiêm trọng",
+    "version": 2,
+    "cancelledPendingOrdersCount": 3,
+    "releasedHeldSeatsCount": 2,
+    "releasedHeldStandingCount": 5,
+    "totalReleasedHoldsCount": 7,
+    "suspendedAt": "2026-11-20T19:30:00.000Z"
+  }
+}
+```
+
+#### `POST /api/v1/admin/events/:id/resume`
+
+Khôi phục mở bán sự kiện đã bị đình chỉ trở lại trạng thái `PUBLISHED` sau khi ban tổ chức giải trình và khắc phục xong vi phạm. Chỉ áp dụng cho sự kiện chưa kết thúc (`endTime > NOW()`).
+
+- Quyền: `ADMIN`
+- Header: `Authorization: Bearer <adminToken>`
+- Request body (tùy chọn):
+
+```json
+{
+  "reason": "Ban tổ chức đã bổ sung đầy đủ giấy phép biểu diễn hợp lệ",
+  "version": 2
+}
+```
+
+- Response: `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "eventId": "evt-uuid",
+    "status": "PUBLISHED",
+    "version": 3,
+    "resumedAt": "2026-11-20T20:00:00.000Z"
+  }
+}
+```
+
+#### `GET /api/v1/admin/events/:id/audit-logs`
+
+Truy vấn danh sách lịch sử kiểm toán bất biến theo sự kiện phục vụ trang điều khiển khẩn cấp `/admin/events/[id]/control`.
+
+- Quyền: `ADMIN`
+- Header: `Authorization: Bearer <adminToken>`
+- Query params:
+  - `page`: Số trang (mặc định 1)
+  - `limit`: Số bản ghi mỗi trang (mặc định 20, tối đa 100)
+  - `action`: Lọc theo loại hành động kiểm toán (tùy chọn)
+- Response: `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": 12,
+        "actorId": "admin-uuid",
+        "actorRole": "ADMIN",
+        "action": "EVENT_KILL_SWITCH_ACTIVATED",
+        "targetType": "EVENT",
+        "targetId": "evt-uuid",
+        "changes": {
+          "oldStatus": "PUBLISHED",
+          "newStatus": "SUSPENDED",
+          "reason": "Phát hiện thông tin giả mạo",
+          "cancelledPendingOrdersCount": 3,
+          "releasedHeldSeatsCount": 2,
+          "releasedHeldStandingCount": 5,
+          "totalReleasedHoldsCount": 7
+        },
+        "ipAddress": "127.0.0.1",
+        "userAgent": "Mozilla/5.0 ...",
+        "createdAt": "2026-11-20T19:30:00.000Z"
+      }
+    ],
+    "meta": {
+      "total": 1,
+      "page": 1,
+      "limit": 20,
+      "totalPages": 1
+    }
+  }
+}
+```
+
+#### `GET /api/v1/admin/reconciliations`
+
+Lấy danh sách đối soát giao dịch giữa đơn hàng hệ thống và dữ liệu thanh toán VNPay.
 
 - Header: `Authorization: Bearer <adminToken>`
-- Request body: `{ "reason": "Phát hiện thông tin giả mạo" }`
-- Response 200: Sự kiện chuyển `SUSPENDED`, hủy các đơn đang giữ chỗ và giải tán hàng chờ.
+- Query params: `eventId` (tùy chọn), `status` (`ALL`, `MATCHED`, `AMOUNT_MISMATCH`, `MISSING_TRANSACTION`, `ORPHAN_TRANSACTION`), `page`, `limit`
+- Response 200: Danh sách giao dịch đối soát, phân loại trạng thái và khối thống kê tổng hợp `summary`.
 
-#### [PLANNED] `GET /api/v1/admin/reconciliations`
+#### `GET /api/v1/admin/payouts`
 
-Lấy danh sách đối soát giao dịch với dữ liệu VNPay.
+Lấy danh sách các lệnh quyết toán chi trả doanh thu cho Ban tổ chức trên toàn hệ thống.
 
-- Response 200: Danh sách giao dịch khớp và các bản ghi phát hiện chênh lệch.
+- Header: `Authorization: Bearer <adminToken>`
+- Query params: `status` (`PENDING`, `HOLD`, `PAID_OUT`), `organizerId`, `eventId`, `page`, `limit`
+- Response 200: Danh sách lệnh chi trả kèm thông tin sự kiện và phân trang.
 
-#### [PLANNED] `POST /api/v1/admin/payouts/:id/approve`
+#### `POST /api/v1/admin/payouts/generate`
+
+Tính toán doanh thu sự kiện, khấu trừ tiền hoàn vé, phí sàn (5%) và phí cổng VNPay (1.5%) để tạo hoặc cập nhật lệnh quyết toán ở trạng thái `PENDING`.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Request body: `{ "eventId": "uuid-event" }`
+- Response 200: Thông tin chi tiết lệnh quyết toán đã tính toán.
+
+#### `POST /api/v1/admin/payouts/:id/approve`
 
 Xác nhận phê duyệt lệnh chi trả tiền bán vé cho ban tổ chức.
 
-- Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT`.
+- Header: `Authorization: Bearer <adminToken>`
+- Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT` và ghi vết kiểm toán vào `audit_log`.
 
-#### [PLANNED] `POST /api/v1/admin/venues`
+#### `POST /api/v1/admin/payouts/:id/hold`
+
+Tạm giữ lệnh chi trả khi phát hiện khiếu nại hoặc tranh chấp vé.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Request body: `{ "reason": "Phát hiện đơn hàng tranh chấp đang khiếu nại" }`
+- Response 200: Lệnh chi trả chuyển trạng thái `HOLD` kèm lý do.
+
+#### `POST /api/v1/admin/payouts/:id/recalculate`
+
+Tính toán lại các con số doanh thu, tiền hoàn và phí cho lệnh chi trả đang ở trạng thái `PENDING` hoặc `HOLD`.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Response 200: Lệnh chi trả với các con số cập nhật mới nhất.
+
+#### `POST /api/v1/admin/venues`
 
 Quản trị viên tạo mới hoặc nhập một địa điểm tổ chức chuẩn vào hệ thống.
 
@@ -937,7 +1121,7 @@ Quản trị viên tạo mới hoặc nhập một địa điểm tổ chức ch
 }
 ```
 
-#### [PLANNED] `POST /api/v1/admin/venues/:id/layouts`
+#### `POST /api/v1/admin/venues/:id/layouts`
 
 Quản trị viên liên kết mẫu sơ đồ SVG đã chuẩn hóa (hoặc tải lên SVG mới) cho địa điểm tổ chức.
 
@@ -981,7 +1165,7 @@ Quản trị viên liên kết mẫu sơ đồ SVG đã chuẩn hóa (hoặc t�
 }
 ```
 
-#### [PLANNED] `PUT /api/v1/admin/venues/:id`
+#### `PUT /api/v1/admin/venues/:id`
 
 Quản trị viên cập nhật thông tin địa điểm hoặc tạm ngưng khả dụng.
 
@@ -1103,6 +1287,14 @@ Ban tổ chức nộp sự kiện để quản trị viên phê duyệt (chuyể
 - Header: `Authorization: Bearer <organizerToken>`
 - Response 200: Sự kiện chuyển trạng thái chờ duyệt
 
+#### `GET /api/v1/organizer/payouts`
+
+Ban tổ chức tra cứu danh sách các khoản quyết toán chi trả của các sự kiện do chính mình sở hữu.
+
+- Header: `Authorization: Bearer <organizerToken>`
+- Query params: `page`, `limit`
+- Response 200: Danh sách các lệnh chi trả kèm số tiền thực nhận (`netPayout`) và trạng thái.
+
 ---
 
 ### Tìm kiếm sự kiện nâng cao (`/search`)
@@ -1132,3 +1324,9 @@ Kiểm tra kết nối tới cơ sở dữ liệu PostgreSQL và máy chủ Redi
     }
   }
   ```
+
+### Search W03: xử lý keyword và độ liên quan
+
+Keyword được trim/normalize NFC. Keyword dưới hai ký tự bỏ điều kiện full-text nhưng vẫn áp dụng bộ lọc.
+Keyword hợp lệ ưu tiên ts_rank giảm dần, sau đó startTime/id tăng dần; cursor theo cùng thứ tự để tránh mất/trùng kết quả.
+Không phục hồi UC03 hoặc admission token.

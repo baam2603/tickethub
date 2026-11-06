@@ -30,8 +30,6 @@ export const CreateEventRequestSchema = z.object({
   startTime: z.string().datetime(),
   endTime: z.string().datetime(),
   gateOpeningTime: z.string().datetime(),
-  isWaitingRoomEnabled: z.boolean().default(false),
-  maxActiveUsers: z.number().int().positive().default(200),
   refundPolicyType: z
     .enum([
       RefundPolicyType.STRICT,

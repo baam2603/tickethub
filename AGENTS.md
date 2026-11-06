@@ -98,12 +98,25 @@ Tài liệu này là Hiến chương Dự án bất biến (Immutable Project Co
   - `FLEXIBLE`: Cho phép hoàn 100% giá vé nếu yêu cầu trước 7 ngày; hoàn 50% nếu yêu cầu trước 3 ngày; không hoàn tiền trong vòng 3 ngày trước sự kiện.
   - `STRICT`: Cho phép hoàn 50% nếu yêu cầu trước 14 ngày; không hoàn tiền trong vòng 14 ngày trước sự kiện.
   - `NO_REFUND`: Không áp dụng hoàn vé tự nguyện dưới mọi hình thức (trừ trường hợp sự kiện bị Ban tổ chức hoặc Admin hủy bỏ).
+- **Phạm vi hủy vé theo từng vé (Per-Ticket / Partial Refund):**
+  - Cho phép người mua chọn hủy 1 hoặc nhiều vé cụ thể trong đơn hàng thay vì bắt buộc hủy toàn bộ đơn.
+  - Khi hủy vé: thu hồi vé được chọn (chuyển trạng thái vé sang `CANCELLED`), giải phóng ghế tương ứng về `AVAILABLE` (đối với vé có số ghế) hoặc giảm `soldCount` của TicketType (đối với vé đứng GA), các vé còn lại trong đơn vẫn giữ nguyên giá trị sử dụng.
+  - Trạng thái đơn hàng: Đơn giữ trạng thái `PAID` nếu chỉ hủy một phần số vé (Partial Refund); đổi sang `REFUNDED` khi toàn bộ vé trong đơn đã bị hủy hoàn toàn.
+- **Quy tắc phân bổ giảm giá voucher khi hoàn tiền (Pro-rata Voucher Deduction):**
+  - Số tiền hoàn được tính dựa trên giá thực trả của vé sau khi khấu trừ tỷ lệ voucher:
+    `effectivePaidPrice = unitPrice * (finalAmount / totalAmount)`
+  - Số tiền hoàn cho từng vé:
+    `refundAmount = Math.round(effectivePaidPrice * (refundPercentage / 100))`
+  - Phí khấu trừ hoặc phần không được hoàn:
+    `feeDeducted = effectivePaidPrice - refundAmount`
+  - Chặn trần an toàn (Safety Cap): Tổng tiền hoàn tích lũy của đơn hàng qua các lần hủy tuyệt đối không vượt quá số tiền thực trả ban đầu (`finalAmount`), ngăn chặn hoàn toàn rủi ro thâm hụt tài chính hoặc gian lận voucher.
 - **Quy trình kỹ thuật xử lý hoàn tiền:**
-  1. Người dùng yêu cầu hủy vé tại trang `/buyer/orders/[id]`.
-  2. Backend kiểm tra điều kiện thời gian và tính toán số tiền hoàn hợp lệ.
-  3. Thu hồi vé nguyên tử trong một Database Transaction: Đổi trạng thái vé từ `SOLD` sang `REFUNDED`, chuyển trạng thái ghế về `AVAILABLE`, cập nhật trạng thái đơn hàng.
-  4. Áp dụng mô hình Transactional Outbox Pattern: Lưu sự kiện hoàn tiền vào cơ sở dữ liệu và chuyển cho tiến trình nền (Worker / BullMQ) gọi API VNPay Refund với cơ chế thử lại lũy tiến (Exponential Backoff).
-  5. Tuyệt đối không gọi HTTP API của bên thứ ba trực tiếp bên trong Database Transaction.
+  1. Người dùng chọn vé cần hủy tại trang `/buyer/orders/[id]`.
+  2. Giao diện gọi API xem trước: `POST /api/v1/refund/preview` với payload `{ "orderId": "...", "ticketIds": ["..."] }`. Backend xác thực quyền sở hữu (chống IDOR), kiểm tra mốc thời gian sự kiện, tính toán số tiền hoàn và phí khấu trừ minh bạch.
+  3. Người dùng xác nhận gửi yêu cầu: `POST /api/v1/refund/request` kèm header `Idempotency-Key: <UUID>` và lý do hủy vé.
+  4. Thu hồi vé nguyên tử trong một Database Transaction: Đổi trạng thái các vé từ `SOLD` sang `CANCELLED`, chuyển trạng thái ghế về `AVAILABLE` (hoặc giảm `soldCount`), tạo bản ghi trong bảng `refunds` với trạng thái `PENDING`, cập nhật trạng thái đơn hàng (`PAID` hoặc `REFUNDED`).
+  5. Áp dụng mô hình Transactional Outbox Pattern: Lưu sự kiện `REFUND_REQUESTED` vào bảng `outbox` trong cùng DB transaction và chuyển cho tiến trình nền gọi API Hoàn tiền của VNPay (`vnp_Command=refund`, `vnp_TransactionType=03` cho hoàn từng phần hoặc `02` cho hoàn toàn phần).
+  6. Tuyệt đối không gọi HTTP API của bên thứ ba trực tiếp bên trong Database Transaction.
 
 ### 1.8. Soát Vé Bằng Mã QR Động Ed25519 Và Tra Cứu Dự Phòng (UC08)
 

@@ -36,11 +36,13 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
   ```
 - Sau khi transaction thành công, server trả về mã đơn hàng `orderId` kèm danh sách ghế cụ thể đã cấp phát (`allocatedSeats` gồm `zoneName`, `rowLabel`, `seatNumber`). Giao diện client chỉ nhận danh sách này và hiển thị thông tin hàng ghế cho người dùng trong thông tin tóm tắt đơn hàng.
 
-### 1.3 Ranh giới Hàng Chờ Ảo (Virtual Waiting Room - UC03)
+### 1.3 Loại bỏ Hàng Chờ Ảo (Virtual Waiting Room - UC03)
 
-- Hàng chờ ảo chạy trên Redis Sorted Sets, đóng vai trò là van điều tiết lưu lượng cổng vào, chỉ kích hoạt khi sự kiện có cấu hình `isWaitingRoomEnabled = true`.
-- Với các sự kiện thông thường (`isWaitingRoomEnabled = false`), người dùng không qua hàng chờ mà đi thẳng vào giữ chỗ.
-- Mã lượt vào (`x-admission-token`) do server cấp phát có chữ ký xác thực. Client không tự sinh token giả lập ở local storage. Khi backend trả về mã lỗi thiếu token (`MISSING_ADMISSION_TOKEN`), client tự động điều hướng người dùng sang trang `/waiting-room`.
+- Hàng chờ ảo (UC03) đã được loại bỏ hoàn toàn khỏi phạm vi sản phẩm và kỹ thuật, theo AGENTS.md mục 1.3. Không xây dựng và không đưa trở lại dự án.
+- Không có màn hình `/waiting-room`. Backend không cấp phát, không gửi và không kiểm tra header `x-admission-token`. Không dùng mã lỗi `MISSING_ADMISSION_TOKEN`.
+- Luồng mua vé là luồng trực tiếp: Xem sự kiện -> Chọn Zone và số lượng -> Giữ chỗ và chuyển hướng thanh toán.
+- Khả năng chịu tải khi mua đồng thời được đảm bảo bằng Redis Sliding-Window Rate Limiter kết hợp khóa dòng PostgreSQL (`FOR UPDATE SKIP LOCKED`).
+- Các PR hoặc mã nguồn còn chứa hàng chờ ảo (module `waiting-room`, tham số `admissionToken`, cờ `isWaitingRoomEnabled`, test UC03) cần được loại bỏ, không được hợp nhất.
 
 ---
 
@@ -60,8 +62,7 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 ### 2.2 Vĩ Kiệt (Frontend Lead)
 
 - **Gói W03-FE1 (Tiến độ: 80% - Đang sửa PR #42)**:
-  - Loại bỏ mã tự sinh token giả lập (`adm_w03_...`) và bộ đếm client trong `apps/web/src/app/(public)/waiting-room/page.tsx`. Màn hình hàng chờ tiêu thụ API thực tế `POST /api/v1/waiting-room/:eventId/join` và `heartbeat`.
-  - Sửa mã lỗi bắt sự kiện chuyển hướng trong `apps/web/src/components/events/event-detail-client.tsx` thành `MISSING_ADMISSION_TOKEN` (thay cho mã cũ `WAITING_ROOM_REQUIRED`).
+  - Loại bỏ toàn bộ phần hàng chờ ảo khỏi PR #42: xóa trang `apps/web/src/app/(public)/waiting-room/page.tsx`, mã token giả lập (`adm_w03_...`), bộ đếm client và logic chuyển hướng sang `/waiting-room` trong `apps/web/src/components/events/event-detail-client.tsx`. PR chỉ giữ lại phần tìm kiếm sự kiện.
   - Loại bỏ logic tự sinh mã đơn hàng giả `ORD-XXXXX` ở client khi API chưa phản hồi; không cho phép thanh toán với đơn hàng ảo.
   - Chuyển đổi 10 thẻ `<img>` thô sang component `<Image />` từ `next/image`.
   - Tiếp nhận bàn giao giao diện chọn phân khu (Zone Map) từ FE2 để tích hợp hoàn chỉnh tại trang chi tiết sự kiện.
@@ -83,9 +84,9 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 
 - **Gói W03-BE1 (Tiến độ: 100% - Đã nghiệm thu tại PR #14)**:
   - Đã kiểm chứng thuật toán Auto-Seat Allocation, transaction phân tầng PostgreSQL và tác vụ dọn dẹp đơn hết hạn.
-- **Gói W04-BE1 (Tiến độ: 20% - Mở song song)**:
+- **Gói W04-BE1 (Tiến độ: 100% - Đã hoàn tất và nghiệm thu)**:
   - Hoàn tất đơn hàng nguyên tử khi nhận tín hiệu thanh toán thành công (PENDING sang PAID, HELD sang SOLD, sinh mã vé).
-  - Thiết lập endpoint SSE đẩy trạng thái ghế cập nhật thời gian thực qua Redis Pub/Sub.
+  - Thiết lập endpoint SSE đẩy trạng thái ghế cập nhật thời gian thực qua Redis Pub/Sub (`GET /api/v1/events/:id/seats/stream`).
   - Xây dựng API hủy vé và hoàn tiền theo chính sách (UC06).
 
 ### 2.5 Tuấn Khôi (Backend Integration)
@@ -100,9 +101,9 @@ Tài liệu này được ban hành nhằm thống nhất mô hình kiến trúc
 
 ## 3. Lộ Trình Nghiệm Thu & Kế Hoạch Thực Hiện Song Song
 
-| Ngày                   | Mục tiêu trọng tâm                                                                                                                 | Trách nhiệm                |
-| :--------------------- | :--------------------------------------------------------------------------------------------------------------------------------- | :------------------------- |
-| **04/11/2026**         | Sửa dứt điểm và merge các PR Tuần 3: PR #17 (QA Concurrency) và PR #42 (FE1 Search & Waiting Room). Đóng PR #12 của FE2.           | Gia Khang, Vĩ Kiệt, Phú An |
-| **05/11 - 07/11/2026** | Hoàn thiện tích hợp cổng thanh toán VNPay sandbox giữa Backend và Web Client. Bàn giao màn hình Vé của tôi và template email HTML. | Tuấn Khôi, Vĩ Kiệt, Phú An |
-| **08/11 - 09/11/2026** | Kiểm thử tích hợp toàn trình luồng mua vé: Tìm kiếm -> Hàng chờ -> Giữ chỗ tự động -> Thanh toán VNPay -> Nhận vé QR.              | Gia Khang, Toàn nhóm       |
-| **10/11/2026**         | Nghiệm thu Giai đoạn 2 (Bán vé & Hàng chờ), sẵn sàng chuyển giao sang Giai đoạn 3 (Cổng soát vé PWA & Vận hành).                   | PM, Toàn nhóm              |
+| Ngày                   | Mục tiêu trọng tâm                                                                                                                        | Trách nhiệm                |
+| :--------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- | :------------------------- |
+| **04/11/2026**         | Sửa dứt điểm và merge các PR Tuần 3: PR #17 (QA Concurrency, bỏ phần UC03) và PR #42 (FE1 Search, bỏ phần hàng chờ). Đóng PR #12 của FE2. | Gia Khang, Vĩ Kiệt, Phú An |
+| **05/11 - 07/11/2026** | Hoàn thiện tích hợp cổng thanh toán VNPay sandbox giữa Backend và Web Client. Bàn giao màn hình Vé của tôi và template email HTML.        | Tuấn Khôi, Vĩ Kiệt, Phú An |
+| **08/11 - 09/11/2026** | Kiểm thử tích hợp toàn trình luồng mua vé: Tìm kiếm -> Giữ chỗ tự động -> Thanh toán VNPay -> Nhận vé QR.                                 | Gia Khang, Toàn nhóm       |
+| **10/11/2026**         | Nghiệm thu Giai đoạn 2 (Bán vé), sẵn sàng chuyển giao sang Giai đoạn 3 (Cổng soát vé PWA & Vận hành).                                     | PM, Toàn nhóm              |

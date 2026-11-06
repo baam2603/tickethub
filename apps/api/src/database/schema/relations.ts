@@ -12,6 +12,8 @@ import { refunds } from "./refunds";
 import { gates } from "./gates";
 import { eventStaff } from "./event-staff";
 import { payouts } from "./payouts";
+import { venues } from "./venues";
+import { venueLayouts } from "./venue-layouts";
 
 export const usersRelations = relations(users, ({ one, many }) => ({
   organizerProfile: one(organizerProfiles, {
@@ -44,6 +46,14 @@ export const eventsRelations = relations(events, ({ one, many }) => ({
     fields: [events.organizerId],
     references: [organizerProfiles.id],
   }),
+  venue: one(venues, {
+    fields: [events.venueId],
+    references: [venues.id],
+  }),
+  venueLayout: one(venueLayouts, {
+    fields: [events.venueLayoutId],
+    references: [venueLayouts.id],
+  }),
   ticketTypes: many(ticketTypes),
   seats: many(seats),
   orders: many(orders),
@@ -52,6 +62,22 @@ export const eventsRelations = relations(events, ({ one, many }) => ({
   staff: many(eventStaff),
   payouts: many(payouts),
 }));
+
+export const venuesRelations = relations(venues, ({ many }) => ({
+  layouts: many(venueLayouts),
+  events: many(events),
+}));
+
+export const venueLayoutsRelations = relations(
+  venueLayouts,
+  ({ one, many }) => ({
+    venue: one(venues, {
+      fields: [venueLayouts.venueId],
+      references: [venues.id],
+    }),
+    events: many(events),
+  }),
+);
 
 export const ticketTypesRelations = relations(ticketTypes, ({ one, many }) => ({
   event: one(events, {

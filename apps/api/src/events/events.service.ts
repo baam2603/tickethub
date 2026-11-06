@@ -44,8 +44,6 @@ export interface UpdateEventDto {
   startTime?: string;
   endTime?: string;
   gateOpeningTime?: string;
-  isWaitingRoomEnabled?: boolean;
-  maxActiveUsers?: number;
   version: number;
 }
 
@@ -116,8 +114,6 @@ export class EventsService {
           endTime: new Date(dto.endTime),
           gateOpeningTime: new Date(dto.gateOpeningTime),
           status: EventStatus.DRAFT,
-          isWaitingRoomEnabled: dto.isWaitingRoomEnabled,
-          maxActiveUsers: dto.maxActiveUsers,
           refundPolicyType: dto.refundPolicyType,
           refundPolicyRules: dto.refundPolicyRules,
           version: 1,
@@ -269,10 +265,6 @@ export class EventsService {
     if (dto.endTime) updateData.endTime = new Date(dto.endTime);
     if (dto.gateOpeningTime)
       updateData.gateOpeningTime = new Date(dto.gateOpeningTime);
-    if (dto.isWaitingRoomEnabled !== undefined)
-      updateData.isWaitingRoomEnabled = dto.isWaitingRoomEnabled;
-    if (dto.maxActiveUsers !== undefined)
-      updateData.maxActiveUsers = dto.maxActiveUsers;
 
     const [updated] = await db
       .update(events)

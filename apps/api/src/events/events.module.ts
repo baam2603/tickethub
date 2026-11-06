@@ -6,10 +6,11 @@ import {
 } from "./events.controller";
 import { AuthModule } from "../auth/auth.module";
 import { EventReadCacheService } from "./event-read-cache.service";
+import { SeatStreamService } from "./seat-stream.service";
 @Module({
   imports: [AuthModule],
   controllers: [OrganizerEventsController, PublicEventsController],
-  providers: [EventsService, EventReadCacheService],
-  exports: [EventsService, EventReadCacheService],
+  providers: [EventsService, EventReadCacheService, SeatStreamService],
+  exports: [EventsService, EventReadCacheService, SeatStreamService],
 })
 export class EventsModule {}

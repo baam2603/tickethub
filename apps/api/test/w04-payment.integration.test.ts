@@ -1,6 +1,8 @@
 import "reflect-metadata";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import { once } from "node:events";
+import { SeatStreamService } from "../src/events/seat-stream.service";
 import { createHmac, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { Module } from "@nestjs/common";
@@ -22,6 +24,7 @@ import { env } from "../src/config/env.config";
 import { db, sqlClient } from "../src/database/db";
 import {
   events,
+  idempotencyKeys,
   orderItems,
   orders,
   organizerProfiles,
@@ -44,6 +47,8 @@ import { VnpayQueryService } from "../src/payments/vnpay-query.service";
 import { VnpayApi, formatVnpayDate } from "../src/payments/vnpay-api";
 import { processPaymentOutboxOnce } from "../src/jobs/payment-outbox";
 
+import { RefundsController } from "../src/refunds/refunds.controller";
+import { RefundsService } from "../src/refunds/refunds.service";
 @Module({})
 class PaymentTestModule {}
 
@@ -146,7 +151,6 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
         startTime: new Date(Date.now() + 864000000),
         endTime: new Date(Date.now() + 900000000),
         gateOpeningTime: new Date(),
-        isWaitingRoomEnabled: false,
       })
       .returning();
     createdEvents.push(event!.id);
@@ -400,13 +404,20 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
       .returning();
     organizerId = org!.id;
     const cache = new EventReadCacheService(redis, new EventsService());
-    const ipnService = new VnpayIpnService(cache);
+    const stream = new SeatStreamService(redis);
+    const ipnService = new VnpayIpnService(cache, stream);
     app = await NestFactory.create<NestFastifyApplication>(
       {
         module: PaymentTestModule,
-        controllers: [PaymentController, VnpayIpnController],
+        controllers: [
+          PaymentController,
+          VnpayIpnController,
+          RefundsController,
+        ],
         providers: [
           { provide: JwtService, useValue: jwt },
+          { provide: SeatStreamService, useValue: stream },
+          { provide: RefundsService, useValue: new RefundsService() },
           { provide: JwtAuthGuard, useValue: new JwtAuthGuard(jwt) },
           { provide: PaymentService, useValue: new PaymentService() },
           { provide: VnpayIpnService, useValue: ipnService },
@@ -427,6 +438,10 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
     await app?.close();
     await api.onModuleDestroy();
     await new Promise<void>((resolve) => provider?.close(() => resolve()));
+    if (createdUsers.length)
+      await db
+        .delete(idempotencyKeys)
+        .where(inArray(idempotencyKeys.userId, createdUsers));
     if (createdOrders.length) {
       await db
         .delete(outbox)
@@ -627,7 +642,24 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
   it("IPN muon mat ghe: tao dung mot refund, worker hoan tien va thong bao", async () => {
     const f = await fixture({ expired: true, seated: true, lost: true });
     const tx = await originalPayment(f.order.id);
-    assert.equal((await ipn(tx.transactionRef)).body.RspCode, "00");
+    const subscriber = redis.duplicate();
+    await subscriber.subscribe(`events:${f.order.eventId}:seats`);
+    try {
+      const message = once(subscriber, "message", {
+        signal: AbortSignal.timeout(3000),
+      });
+      assert.equal((await ipn(tx.transactionRef)).body.RspCode, "00");
+      const [, raw] = await message;
+      const update = JSON.parse(String(raw));
+      assert.equal(
+        update.status,
+        "SOLD",
+        "Ghe da ban cho don khac khong duoc phat AVAILABLE",
+      );
+      assert.deepEqual(update.seatIds, [f.seatId]);
+    } finally {
+      subscriber.disconnect();
+    }
     assert.equal(
       (await orderState(f.order.id))?.status,
       OrderStatus.PAYMENT_EXPIRED_REFUND_PENDING,
@@ -896,6 +928,77 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
     assert.equal((await orderState(f.order.id))?.status, OrderStatus.PAID);
     assert.equal(providerCalls.at(-1)?.vnp_TransactionType, "03");
     assert.equal(providerCalls.at(-1)?.vnp_Amount, "5000000");
+  });
+  it("Tich hop UC06 -> worker VNPay: hoan toan bo don REFUNDED va giu gia luc mua", async () => {
+    const f = await fixture();
+    const pay = await payment(f.order.id);
+    await ipn(pay.body.data.transactionRef);
+    const issued = await db.query.tickets.findFirst({
+      where: eq(tickets.orderId, f.order.id),
+    });
+    assert.ok(issued);
+    await db
+      .update(ticketTypes)
+      .set({ price: "1" })
+      .where(eq(ticketTypes.id, f.type.id));
+    const body = {
+      orderId: f.order.id,
+      ticketIds: [issued.id],
+      reason: "Buyer cancellation",
+    };
+    const preview = await http("/api/v1/refund/preview", "POST", body);
+    assert.equal(preview.status, 201, JSON.stringify(preview.body));
+    assert.equal(preview.body.totalRefundAmount, 100000);
+    const key = randomUUID();
+    const cancelled = await http(
+      "/api/v1/refund/request",
+      "POST",
+      body,
+      buyer,
+      key,
+    );
+    assert.equal(cancelled.status, 201, JSON.stringify(cancelled.body));
+    assert.equal(cancelled.body.refundAmount, 100000);
+    assert.equal((await orderState(f.order.id))?.status, OrderStatus.REFUNDED);
+    const event = await eventFor(f.order.id, "REFUND_REQUESTED");
+    assert.ok(event);
+    await processPaymentOutboxOnce(api, event.id);
+    const saved = await db.query.refunds.findFirst({
+      where: eq(refunds.id, cancelled.body.refundIds[0]),
+    });
+    assert.equal(saved?.status, RefundStatus.COMPLETED);
+    assert.equal(
+      (await db.query.outbox.findFirst({ where: eq(outbox.id, event.id) }))
+        ?.status,
+      OutboxStatus.COMPLETED,
+    );
+    const sent = providerCalls.filter(
+      (p) =>
+        p.vnp_Command === "refund" &&
+        p.vnp_TxnRef === pay.body.data.transactionRef,
+    );
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.vnp_Amount, "10000000");
+    const replay = await http(
+      "/api/v1/refund/request",
+      "POST",
+      body,
+      buyer,
+      key,
+    );
+    assert.deepEqual(replay.body, cancelled.body);
+    assert.equal(
+      (
+        await http(
+          "/api/v1/refund/request",
+          "POST",
+          { orderId: "invalid" },
+          buyer,
+          randomUUID(),
+        )
+      ).status,
+      400,
+    );
   });
   it("QueryDR ky ca PromotionCode/Amount va chap nhan so tien JSON integer", async () => {
     const f = await fixture();
