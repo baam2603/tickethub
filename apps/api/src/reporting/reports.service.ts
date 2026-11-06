@@ -9,8 +9,16 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import type Redis from "ioredis";
 import { db } from "../database/db";
 import { gateCheckinLogs, reportExports, users } from "../database/schema";
-import { requireEvent } from "../organizer-operations/access";
-import type { Page } from "../organizer-operations/operations.schemas";
+import {
+  requireEvent,
+  requireReportEvent,
+} from "../organizer-operations/access";
+import type {
+  Page,
+  ReportPeriod,
+} from "../organizer-operations/operations.schemas";
+import { readReportBreakdown } from "./report-breakdown";
+import { readCheckinSummary } from "./checkin-summary";
 import { readReport } from "./report-data";
 export const REPORT_REDIS = "REPORT_REDIS";
 @Injectable()
@@ -19,9 +27,13 @@ export class ReportsService {
   onModuleDestroy() {
     this.redis.disconnect();
   }
-  async report(userId: string, eventId: string) {
-    const { profile } = await requireEvent(userId, eventId);
-    const key = `uc09:v1:${profile.id}:${eventId}`;
+  async report(userId: string, eventId: string, period: ReportPeriod = {}) {
+    const { profile } = await requireReportEvent(
+      userId,
+      eventId,
+      period.ticketTypeId,
+    );
+    const key = `uc09:v2:${profile.id}:${eventId}:${period.fromDate ?? "all"}:${period.toDate ?? "all"}:${period.ticketTypeId ?? "all"}:${period.voucherCode ?? "all"}`;
     try {
       const cached = await this.redis.get(key);
       if (cached)
@@ -29,13 +41,30 @@ export class ReportsService {
     } catch {
       /* MV van la nguon doc khi Redis loi. */
     }
-    const result = await readReport(eventId, profile.id);
+    const result = await readReport(eventId, profile.id, period);
     try {
       await this.redis.set(key, JSON.stringify(result), "EX", 60);
     } catch {
       /* Khong chan bao cao neu cache loi. */
     }
     return result;
+  }
+  async breakdown(
+    userId: string,
+    eventId: string,
+    filter: Page & ReportPeriod,
+    kind: "buyers" | "vouchers",
+  ) {
+    const { profile } = await requireReportEvent(
+      userId,
+      eventId,
+      filter.ticketTypeId,
+    );
+    return readReportBreakdown(eventId, profile.id, filter, kind);
+  }
+  async checkinSummary(userId: string, eventId: string) {
+    await requireEvent(userId, eventId);
+    return readCheckinSummary(eventId);
   }
   async history(userId: string, eventId: string, page: Page) {
     await requireEvent(userId, eventId);
@@ -44,11 +73,20 @@ export class ReportsService {
       .from(gateCheckinLogs)
       .where(eq(gateCheckinLogs.eventId, eventId))
       .orderBy(desc(gateCheckinLogs.checkedInAt), desc(gateCheckinLogs.id))
-      .limit(page.limit)
+      .limit(page.limit + 1)
       .offset((page.page - 1) * page.limit);
   }
-  async createExport(userId: string, eventId: string, format: "csv" | "xlsx") {
-    const { profile } = await requireEvent(userId, eventId);
+  async createExport(
+    userId: string,
+    eventId: string,
+    format: "csv" | "xlsx",
+    period: ReportPeriod = {},
+  ) {
+    const { profile } = await requireReportEvent(
+      userId,
+      eventId,
+      period.ticketTypeId,
+    );
     return db.transaction(async (tx) => {
       await tx.select().from(users).where(eq(users.id, userId)).for("update");
       const pending = await tx
@@ -69,15 +107,63 @@ export class ReportsService {
           organizerId: profile.id,
           eventId,
           format,
+          ticketTypeId: period.ticketTypeId ?? null,
+          voucherCode: period.voucherCode ?? null,
+          fromDate: period.fromDate ?? null,
+          toDate: period.toDate ?? null,
         })
         .returning({
           id: reportExports.id,
           status: reportExports.status,
           format: reportExports.format,
           createdAt: reportExports.createdAt,
+          ticketTypeId: reportExports.ticketTypeId,
+          voucherCode: reportExports.voucherCode,
+          fromDate: reportExports.fromDate,
+          toDate: reportExports.toDate,
         });
       return job!;
     });
+  }
+  async listExports(userId: string, eventId: string, page: Page) {
+    const { profile } = await requireEvent(userId, eventId);
+    const jobs = await db
+      .select({
+        id: reportExports.id,
+        status: reportExports.status,
+        format: reportExports.format,
+        createdAt: reportExports.createdAt,
+        expiresAt: reportExports.expiresAt,
+        errorMessage: reportExports.errorMessage,
+        ticketTypeId: reportExports.ticketTypeId,
+        voucherCode: reportExports.voucherCode,
+        fromDate: reportExports.fromDate,
+        toDate: reportExports.toDate,
+      })
+      .from(reportExports)
+      .where(
+        and(
+          eq(reportExports.eventId, eventId),
+          eq(reportExports.organizerId, profile.id),
+          eq(reportExports.requestedBy, userId),
+        ),
+      )
+      .orderBy(desc(reportExports.createdAt), desc(reportExports.id))
+      .limit(page.limit + 1)
+      .offset((page.page - 1) * page.limit);
+    return jobs.map((job) => ({
+      ...job,
+      status:
+        job.expiresAt && job.expiresAt.getTime() <= Date.now()
+          ? "EXPIRED"
+          : job.status,
+      downloadUrl:
+        job.status === "COMPLETED" &&
+        job.expiresAt &&
+        job.expiresAt.getTime() > Date.now()
+          ? `/api/v1/organizer/events/${eventId}/reports/exports/${job.id}/download`
+          : null,
+    }));
   }
   async exportStatus(userId: string, eventId: string, exportId: string) {
     const { profile } = await requireEvent(userId, eventId);

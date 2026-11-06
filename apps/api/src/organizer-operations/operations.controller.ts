@@ -25,6 +25,8 @@ import { StaffService } from "./staff.service";
 import {
   AssignmentSchema,
   GateSchema,
+  GatePageSchema,
+  paginated,
   PageSchema,
   StaffCreateSchema,
   StaffUpdateSchema,
@@ -59,9 +61,10 @@ export class OperationsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: unknown,
   ) {
+    const page = parseInput(PageSchema, query);
     return {
       success: true,
-      data: await this.service.list(user.userId, parseInput(PageSchema, query)),
+      ...paginated(await this.service.list(user.userId, page), page),
     };
   }
   @Patch("staff/:staffId") async update(
@@ -95,10 +98,12 @@ export class OperationsController {
   @Get("events/:eventId/gates") async gates(
     @CurrentUser() user: AuthenticatedUser,
     @Param("eventId", new ParseUUIDPipe()) id: string,
+    @Query() query: unknown,
   ) {
+    const page = parseInput(GatePageSchema, query);
     return {
       success: true,
-      data: await this.service.listGates(user.userId, id),
+      ...paginated(await this.service.listGates(user.userId, id, page), page),
     };
   }
   @Post("events/:eventId/staff") async assign(
@@ -118,10 +123,12 @@ export class OperationsController {
   @Get("events/:eventId/staff") async assignments(
     @CurrentUser() user: AuthenticatedUser,
     @Param("eventId", new ParseUUIDPipe()) id: string,
+    @Query() query: unknown,
   ) {
+    const page = parseInput(GatePageSchema, query);
     return {
       success: true,
-      data: await this.service.assignments(user.userId, id),
+      ...paginated(await this.service.assignments(user.userId, id, page), page),
     };
   }
   @Delete("events/:eventId/staff/:staffId") @HttpCode(200) async unassign(

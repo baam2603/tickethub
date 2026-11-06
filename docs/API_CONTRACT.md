@@ -1332,7 +1332,7 @@ Body: `{ "name": "Cổng A", "locationDesc": "Sảnh chính" }`. Response 201 l�
 
 #### `GET /api/v1/organizer/events/:eventId/gates`
 
-Response 200: danh sách cổng của sự kiện, tối đa 100 cổng.
+Response 200: data là mảng cổng, hỗ trợ page/limit (mặc định 1/100, tối đa 100 mỗi trang); meta ở ngoài data gồm page, limit, hasMore. Không giới hạn tổng ở 100 cổng.
 
 #### `POST /api/v1/organizer/events/:eventId/staff`
 
@@ -1340,7 +1340,7 @@ Body: `{ "userId": "staff-uuid", "gateId": "gate-uuid" }`. Chỉ gán nhân viê
 
 #### `GET /api/v1/organizer/events/:eventId/staff`
 
-Response 200: phân công nhân viên trong sự kiện, tối đa 100 dòng; không trả passwordHash.
+Response 200: data là mảng phân công, hỗ trợ page/limit (mặc định 1/100); meta gồm page, limit, hasMore. Không trả passwordHash.
 
 #### `DELETE /api/v1/organizer/events/:eventId/staff/:staffId`
 
@@ -1385,3 +1385,37 @@ Chỉ người tạo, còn quyền với sự kiện, được đọc trạng th
 Yêu cầu JWT và kiểm tra lại quyền. File thực sự là CSV UTF-8 hoặc XLSX, tên file do server tạo. Response 409 khi chưa xong, 410 khi hết hạn 24 giờ, 404 nếu không có file/tài nguyên thuộc người gọi. Header Cache-Control private, no-store. File không được phục vụ trực tiếp từ thư mục public.
 
 CSV ngăn công thức bắt đầu bằng =, +, -, @; Excel ghi dữ liệu không tin cậy bằng ô string, không tạo formula. Một báo cáo hỗ trợ tối đa 10.000 dòng phân tổ; vượt giới hạn báo lỗi thay vì xuất thiếu dữ liệu.
+
+### Mở rộng UC09 cho tích hợp FE1
+
+Hợp đồng chi tiết, quy tắc thời gian/tiền và mẫu response: [w05-be2-integration.md](testing/w05-be2-integration.md).
+
+#### `GET /api/v1/organizer/events/:eventId/checkins/summary`
+
+Thống kê trực tiếp toàn sự kiện và từng cổng: validTickets, checkedInTickets, remainingTickets,
+successfulAttempts, rejectedAttempts, checkinPercentage; kèm generatedAt và timelineLast24Hours theo giờ Việt Nam.
+Không dùng các dòng của một trang lịch sử để tính tổng. activeAssignedStaff không có nghĩa là online.
+
+#### `GET /api/v1/organizer/events/:eventId/reports/exports`
+
+Danh sách job của người tạo và đúng sự kiện thuộc quyền, hỗ trợ page/limit; data là mảng, meta page/limit/hasMore.
+Mỗi job có bộ lọc fromDate/toDate/ticketTypeId/voucherCode, trạng thái hiệu lực và link tải khi còn hạn.
+
+#### `GET /api/v1/organizer/events/:eventId/reports/buyers`
+
+Danh sách đơn đã thanh toán với thông tin liên hệ người mua từ MV; hỗ trợ bộ lọc báo cáo và phân trang.
+Không trả passwordHash, token hay thông tin đăng nhập. Chỉ BTC có quyền sự kiện được xem.
+
+#### `GET /api/v1/organizer/events/:eventId/reports/vouchers`
+
+Phân tích theo voucher từ MV: paidOrders, grossRevenue, discountAmount, paidRevenue,
+refundedAmount, netRevenue, validTickets, refreshedAt. Hỗ trợ bộ lọc báo cáo và phân trang.
+
+GET reports nhận fromDate/toDate (YYYY-MM-DD, cả hai hoặc không có), ticketTypeId, voucherCode.
+POST exports nhận cùng bộ lọc và format, lưu bộ lọc bền vững cho worker. Không truyền lọc giữ hành vi toàn sự kiện.
+Tiền hoàn theo ngày COMPLETED, tiền thu theo ngày thanh toán; kỳ có thể có net âm.
+analytics.fees là NOT_CONFIGURED với giá trị null vì nhóm chưa chốt phí, net_revenue chưa trừ phí.
+HTTP tối đa 10000 dòng, vượt trả 422 REPORT_TOO_LARGE và hướng sang xuất nền; xuất nền tối đa 100000 dòng,
+vượt trả job FAILED REPORT_TOO_LARGE, không xuất thiếu dòng. Giới hạn mới thay thế giới hạn export 10000 dòng phía trên.
+Danh sách staff, cổng, phân công, checkins và exports giữ data dạng mảng, thêm meta page/limit/hasMore.
+Outbox REPORT_EXPORT_COMPLETED được ghi nguyên tử với hoàn tất job; gửi email cần cấu hình riêng, link vào FE có xác thực.

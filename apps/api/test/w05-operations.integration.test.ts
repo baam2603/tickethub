@@ -30,6 +30,7 @@ import {
   refunds,
   reportExports,
   gateCheckinLogs,
+  outbox,
 } from "../src/database/schema";
 import { env } from "../src/config/env.config";
 import { StaffService } from "../src/organizer-operations/staff.service";
@@ -119,11 +120,17 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
     eventIds.push(e!.id);
     return e!.id;
   }
-  async function makeTicket(amount = "100", discount = "0", qty = 1) {
+  async function makeTicket(
+    amount = "100",
+    discount = "0",
+    qty = 1,
+    targetEvent = eventId,
+    paidAt = new Date("2026-11-10T12:00:00Z"),
+  ) {
     const [tt] = await db
       .insert(ticketTypes)
       .values({
-        eventId,
+        eventId: targetEvent,
         name: "GA",
         price: amount,
         capacity: 100,
@@ -137,14 +144,14 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
       .insert(orders)
       .values({
         userId: buyer,
-        eventId,
+        eventId: targetEvent,
         orderCode: randomUUID().replaceAll("-", ""),
         status: "PAID",
         totalAmount: String(total),
         discountAmount: discount,
         finalAmount: String(total - Number(discount)),
         expiresAt: new Date(),
-        paidAt: new Date("2026-11-10T12:00:00Z"),
+        paidAt,
       })
       .returning();
     orderIds.push(order!.id);
@@ -161,7 +168,7 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
         Array.from({ length: qty }, () => ({
           ticketCode: randomUUID().replaceAll("-", ""),
           orderId: order!.id,
-          eventId,
+          eventId: targetEvent,
           userId: buyer,
           ticketTypeId: tt!.id,
           status: "SOLD" as const,
@@ -244,6 +251,17 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
     try {
       await app?.close();
       if (eventIds.length) {
+        const exportJobs = await db
+          .select({ id: reportExports.id })
+          .from(reportExports)
+          .where(inArray(reportExports.eventId, eventIds));
+        if (exportJobs.length)
+          await db.delete(outbox).where(
+            inArray(
+              outbox.id,
+              exportJobs.map((job) => job.id),
+            ),
+          );
         await db
           .delete(reportExports)
           .where(inArray(reportExports.eventId, eventIds));
@@ -643,6 +661,12 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
         "COMPLETED",
         JSON.stringify(status.body),
       );
+      const notification = await db.query.outbox.findFirst({
+        where: eq(outbox.id, id),
+      });
+      assert.equal(notification?.eventType, "REPORT_EXPORT_COMPLETED");
+      assert.equal(notification.status, "PENDING");
+      assert.deepEqual(notification.payload, { exportId: id });
       assert.equal(
         (
           await request(
@@ -819,6 +843,348 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
       .update(reportExports)
       .set({ status: "FAILED" })
       .where(eq(reportExports.id, id));
+  });
+  it("Loc ngay Viet Nam: tach ngay thu/ngay hoan, bo qua refund PENDING va cache khong lan ky", async () => {
+    const target = await makeEvent(orgProfile, "Period report");
+    const first = await makeTicket(
+      "100",
+      "20",
+      2,
+      target,
+      new Date("2026-11-09T17:00:00Z"),
+    );
+    await makeTicket(
+      "40",
+      "0",
+      1,
+      target,
+      new Date("2026-11-10T16:59:59.999Z"),
+    );
+    await makeTicket("90", "0", 1, target, new Date("2026-11-10T17:00:00Z"));
+    await db.insert(refunds).values([
+      {
+        orderId: first.order.id,
+        amount: "15",
+        reason: "Done",
+        status: "COMPLETED",
+        processedAt: new Date("2026-11-11T17:00:00Z"),
+        idempotencyKey: randomUUID(),
+      },
+      {
+        orderId: first.order.id,
+        amount: "5",
+        reason: "Done",
+        status: "COMPLETED",
+        processedAt: new Date("2026-11-11T17:00:00Z"),
+        idempotencyKey: randomUUID(),
+      },
+      {
+        orderId: first.order.id,
+        amount: "10",
+        reason: "Pending",
+        status: "PENDING",
+        idempotencyKey: randomUUID(),
+      },
+    ]);
+    await refreshReportViews();
+    const root = `/api/v1/organizer/events/${target}/reports`;
+    const result = await request(
+      `${root}?fromDate=2026-11-10&toDate=2026-11-10`,
+    );
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    const summary = result.body.data.summary;
+    assert.equal(Number(summary.paid_revenue), 220);
+    assert.equal(Number(summary.gross_revenue), 240);
+    assert.equal(Number(summary.total_refunded_amount), 0);
+    assert.equal(Number(summary.total_sold_tickets), 3);
+    assert.equal(result.body.data.sales.length, 2);
+    assert.ok(
+      result.body.data.sales.every(
+        (row: { sale_date: string }) => row.sale_date === "2026-11-10",
+      ),
+    );
+    const refundDay = await request(
+      `${root}?fromDate=2026-11-12&toDate=2026-11-12`,
+    );
+    assert.equal(Number(refundDay.body.data.summary.paid_revenue), 0);
+    assert.equal(Number(refundDay.body.data.summary.total_refunded_amount), 20);
+    assert.equal(Number(refundDay.body.data.summary.net_revenue), -20);
+    const all = await request(root);
+    assert.equal(Number(all.body.data.summary.paid_revenue), 310);
+    assert.equal(Number(all.body.data.summary.total_refunded_amount), 20);
+    const empty = await request(
+      `${root}?fromDate=2020-01-01&toDate=2020-01-01`,
+    );
+    assert.equal(Number(empty.body.data.summary.paid_revenue), 0);
+    assert.deepEqual(empty.body.data.sales, []);
+    for (const query of [
+      "fromDate=2026-02-30&toDate=2026-03-01",
+      "fromDate=2026-11-12&toDate=2026-11-10",
+      "fromDate=2026-11-10",
+      "fromDate=x&toDate=y",
+      "toDate=2026-11-10",
+      "ignored=1",
+    ]) {
+      assert.equal((await request(`${root}?${query}`)).status, 400, query);
+    }
+    assert.equal(
+      (
+        await request(
+          `${root}?fromDate=2026-11-10&toDate=2026-11-10`,
+          "GET",
+          undefined,
+          otherOrg,
+        )
+      ).status,
+      404,
+    );
+    for (const format of ["csv", "xlsx"]) {
+      const created = await request(`${root}/exports`, "POST", {
+        format,
+        fromDate: "2026-11-10",
+        toDate: "2026-11-10",
+      });
+      assert.equal(created.status, 202, JSON.stringify(created.body));
+      const jobId = created.body.data.id;
+      await processReportExport(jobId);
+      const state = await request(`${root}/exports/${jobId}`);
+      assert.equal(state.body.data.status, "COMPLETED");
+      assert.equal(state.body.data.fromDate, "2026-11-10");
+      const response = await fetch(base + state.body.data.downloadUrl, {
+        headers: {
+          authorization: `Bearer ${await jwt.signAsync({ sub: orgId, role: "ORGANIZER" })}`,
+        },
+      });
+      assert.equal(response.status, 200);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (format === "csv") {
+        assert.match(
+          buffer.toString(),
+          /"SUMMARY","Period report","","","3","0","240(?:\.00)?","220(?:\.00)?","0(?:\.00)?","220(?:\.00)?"/,
+        );
+        assert.doesNotMatch(buffer.toString(), /"2026-11-11"/);
+      } else {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
+        assert.equal(Number(workbook.worksheets[0]!.getCell("H2").value), 220);
+        assert.equal(workbook.worksheets[0]!.rowCount, 4);
+      }
+    }
+    // Sau F5, FE lay lai danh sach job da luu; khong lo fileName/attemptId noi bo.
+    const jobs = await request(`${root}/exports?limit=1`);
+    assert.equal(jobs.body.data.length, 1);
+    assert.equal(jobs.body.meta.hasMore, true);
+    assert.equal(jobs.body.data[0].fromDate, "2026-11-10");
+    assert.equal(jobs.body.data[0].fileName, undefined);
+    const next = await request(`${root}/exports?page=2&limit=1`);
+    assert.notEqual(next.body.data[0].id, jobs.body.data[0].id);
+    assert.equal(next.body.meta.hasMore, false);
+    assert.equal(
+      (await request(`${root}/exports`, "GET", undefined, otherOrg)).status,
+      404,
+    );
+    assert.equal(
+      (
+        await request(`${root}/exports`, "POST", {
+          format: "csv",
+          fromDate: "2026-11-10",
+        })
+      ).status,
+      400,
+    );
+  });
+  it("Loc hang ve/voucher khop tien don nhieu hang, hoan tung ve va hoan ca don", async () => {
+    const target = await makeEvent(orgProfile, "Dimensions");
+    const first = await makeTicket("100", "0", 2, target);
+    const second = await makeTicket("100", "0", 1, target);
+    const typeA = first.tickets[0]!.ticketTypeId;
+    const typeB = second.tickets[0]!.ticketTypeId;
+    await db
+      .update(orderItems)
+      .set({ orderId: first.order.id })
+      .where(eq(orderItems.orderId, second.order.id));
+    await db
+      .update(tickets)
+      .set({ orderId: first.order.id })
+      .where(eq(tickets.orderId, second.order.id));
+    await db.delete(orders).where(eq(orders.id, second.order.id));
+    await db
+      .update(orders)
+      .set({
+        totalAmount: "300",
+        finalAmount: "200",
+        discountAmount: "100",
+        voucherCode: "SUMMER",
+      })
+      .where(eq(orders.id, first.order.id));
+    await db.insert(refunds).values([
+      {
+        orderId: first.order.id,
+        amount: "10",
+        reason: "Order refund",
+        status: "COMPLETED",
+        processedAt: new Date("2026-11-10T12:00:00Z"),
+        idempotencyKey: randomUUID(),
+      },
+      {
+        orderId: first.order.id,
+        ticketId: second.tickets[0]!.id,
+        amount: "7.10",
+        reason: "Ticket refund",
+        status: "COMPLETED",
+        processedAt: new Date("2026-11-10T12:00:00Z"),
+        idempotencyKey: randomUUID(),
+      },
+    ]);
+    await refreshReportViews();
+    const root = `/api/v1/organizer/events/${target}/reports`;
+    const filter = "fromDate=2026-11-10&toDate=2026-11-10&voucherCode=summer";
+    const a = await request(`${root}?${filter}&ticketTypeId=${typeA}`);
+    const b = await request(`${root}?${filter}&ticketTypeId=${typeB}`);
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    assert.equal(b.status, 200, JSON.stringify(b.body));
+    assert.equal(Number(a.body.data.summary.paid_revenue), 133.33);
+    assert.equal(Number(b.body.data.summary.paid_revenue), 66.67);
+    assert.equal(Number(a.body.data.summary.total_refunded_amount), 6.67);
+    assert.equal(Number(b.body.data.summary.total_refunded_amount), 10.43);
+    assert.equal(b.body.data.sales.length, 1);
+    assert.equal(b.body.data.sales[0].ticket_type_id, typeB);
+    assert.equal(Number(b.body.data.sales[0].paid_revenue), 66.67);
+    const all = await request(`${root}?${filter}`);
+    assert.equal(Number(all.body.data.summary.paid_revenue), 200);
+    assert.equal(Number(all.body.data.summary.total_refunded_amount), 17.1);
+    const buyers = await request(`${root}/buyers?${filter}&limit=1`);
+    assert.equal(buyers.status, 200, JSON.stringify(buyers.body));
+    assert.equal(buyers.body.data.length, 1);
+    assert.equal(buyers.body.data[0].orderId, first.order.id);
+    assert.equal(Number(buyers.body.data[0].paidRevenue), 200);
+    assert.equal(buyers.body.data[0].passwordHash, undefined);
+    const vouchers = await request(`${root}/vouchers?${filter}`);
+    assert.equal(vouchers.status, 200, JSON.stringify(vouchers.body));
+    assert.equal(vouchers.body.data[0].voucherCode, "SUMMER");
+    assert.equal(Number(vouchers.body.data[0].paidOrders), 1);
+    assert.equal(Number(vouchers.body.data[0].discountAmount), 100);
+    assert.equal(Number(vouchers.body.data[0].netRevenue), 182.9);
+    assert.equal(
+      (await request(`${root}/buyers`, "GET", undefined, otherOrg)).status,
+      404,
+    );
+    assert.equal(
+      (await request(`${root}?ticketTypeId=${randomUUID()}`)).status,
+      400,
+    );
+    assert.equal((await request(`${root}?ticketTypeId=invalid`)).status, 400);
+    const created = await request(`${root}/exports`, "POST", {
+      format: "csv",
+      ticketTypeId: typeB,
+      voucherCode: "summer",
+      fromDate: "2026-11-10",
+      toDate: "2026-11-10",
+    });
+    assert.equal(created.status, 202, JSON.stringify(created.body));
+    await processReportExport(created.body.data.id);
+    const state = await request(`${root}/exports/${created.body.data.id}`);
+    assert.equal(state.body.data.status, "COMPLETED");
+    assert.equal(state.body.data.voucherCode, "SUMMER");
+    assert.equal(state.body.data.ticketTypeId, typeB);
+    const response = await fetch(base + state.body.data.downloadUrl, {
+      headers: {
+        authorization: `Bearer ${await jwt.signAsync({ sub: orgId, role: "ORGANIZER" })}`,
+      },
+    });
+    assert.equal(response.status, 200);
+    const csv = await response.text();
+    assert.match(csv, /"66.67"/);
+    assert.match(csv, /"SUMMER"/);
+    assert.doesNotMatch(csv, /"133.33"/);
+  });
+  it("Giam sat dem toan su kien, khong phu thuoc trang lich su hay MV", async () => {
+    const root = `/api/v1/organizer/events/${eventId}/checkins`;
+    const result = await request(`${root}/summary`);
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    const [expected] = await db.execute<{ total: number; success: number }>(sql`
+      select count(*)::int as total,count(*) filter(where outcome='SUCCESS')::int as success
+      from gate_checkin_logs where event_id=${eventId}`);
+    const summary = result.body.data.summary;
+    assert.equal(summary.successfulAttempts, expected!.success);
+    assert.equal(
+      summary.successfulAttempts + summary.rejectedAttempts,
+      expected!.total,
+    );
+    assert.ok(summary.rejectedAttempts >= 19);
+    assert.ok(summary.checkedInTickets <= summary.validTickets);
+    const gate = result.body.data.gates.find(
+      (row: { gateId: string }) => row.gateId === gateId,
+    );
+    assert.ok(gate.checkedInTickets >= 2);
+    assert.equal(gate.activeAssignedStaff, 1);
+    const unused = result.body.data.gates.find(
+      (row: { gateId: string }) => row.gateId === gate2,
+    );
+    assert.equal(unused.checkedInTickets, 0);
+    assert.equal(
+      (await request(`${root}/summary`, "GET", undefined, otherOrg)).status,
+      404,
+    );
+    const history = await request(`${root}?limit=1`);
+    assert.equal(history.body.data.length, 1);
+    assert.equal(history.body.meta.hasMore, true);
+  });
+  it("Bao cao vuot 10000 dong tra 422, xuat nen van tao du du lieu", async () => {
+    const target = await makeEvent(orgProfile, "Large report");
+    const fixture = await makeTicket("1", "0", 1, target);
+    await db.execute(sql`insert into ticket_types(event_id,name,price,capacity,is_seated,sale_start_time,sale_end_time)
+      select ${target},'Large '||n,1,1,false,now(),now()+interval '1 day' from generate_series(1,10000) n`);
+    await db.execute(sql`insert into order_items(order_id,ticket_type_id,quantity,unit_price,subtotal)
+      select ${fixture.order.id},id,1,1,1 from ticket_types where event_id=${target} and id<>${fixture.tickets[0]!.ticketTypeId}`);
+    await db.execute(sql`insert into tickets(ticket_code,order_id,user_id,event_id,ticket_type_id,status)
+      select replace(gen_random_uuid()::text,'-',''),${fixture.order.id},${buyer},${target},id,'SOLD'
+      from ticket_types where event_id=${target} and id<>${fixture.tickets[0]!.ticketTypeId}`);
+    await db
+      .update(orders)
+      .set({ totalAmount: "10001", finalAmount: "10001" })
+      .where(eq(orders.id, fixture.order.id));
+    await refreshReportViews();
+    const root = `/api/v1/organizer/events/${target}/reports`;
+    const result = await request(root);
+    assert.equal(result.status, 422, JSON.stringify(result.body));
+    assert.equal(result.body.code, "REPORT_TOO_LARGE");
+    const filtered = await request(
+      `${root}?ticketTypeId=${fixture.tickets[0]!.ticketTypeId}`,
+    );
+    assert.equal(filtered.status, 200, JSON.stringify(filtered.body));
+    assert.equal(filtered.body.data.sales.length, 1);
+    const created = await request(`${root}/exports`, "POST", { format: "csv" });
+    assert.equal(created.status, 202);
+    await processReportExport(created.body.data.id);
+    const state = await request(`${root}/exports/${created.body.data.id}`);
+    assert.equal(
+      state.body.data.status,
+      "COMPLETED",
+      JSON.stringify(state.body),
+    );
+    const response = await fetch(base + state.body.data.downloadUrl, {
+      headers: {
+        authorization: `Bearer ${await jwt.signAsync({ sub: orgId, role: "ORGANIZER" })}`,
+      },
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.text()).split("\r\n").length, 10003);
+  });
+  it("Phan trang cong, phan cong va tai khoan giu nguyen data mang cho FE cu", async () => {
+    const root = `/api/v1/organizer/events/${eventId}`;
+    const first = await request(`${root}/gates?limit=1`);
+    const next = await request(`${root}/gates?limit=1&page=2`);
+    assert.equal(first.body.meta.hasMore, true);
+    assert.notEqual(first.body.data[0].id, next.body.data[0].id);
+    assert.equal(next.body.meta.hasMore, false);
+    const assignments = await request(`${root}/staff?limit=1`);
+    assert.equal(assignments.body.data[0].userId, staffId);
+    assert.equal(assignments.body.meta.hasMore, false);
+    const accounts = await request("/api/v1/organizer/staff?limit=1");
+    assert.equal(accounts.body.data[0].id, staffId);
+    assert.equal(accounts.body.meta.page, 1);
+    assert.equal((await request(`${root}/gates?page=0`)).status, 400);
   });
   it("Gioi han job dang cho va khong nhan dinh dang/duong dan tuy y", async () => {
     for (let i = 0; i < 3; i++)

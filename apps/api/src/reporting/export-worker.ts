@@ -1,3 +1,4 @@
+import { HttpException } from "@nestjs/common";
 import { and, asc, eq, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink, rename } from "node:fs/promises";
@@ -9,7 +10,9 @@ import {
   events,
   organizerProfiles,
   users,
+  outbox,
 } from "../database/schema";
+import { REPORT_READY } from "./report-notifications";
 import { readReport, refreshReportViews } from "./report-data";
 import { exportFilePath, reportDirectory } from "./export-files";
 function csvCell(value: unknown) {
@@ -72,10 +75,16 @@ export async function processReportExport(targetId?: string) {
         ),
       );
     if (!owner.length) throw new Error("REPORT_ACCESS_REVOKED");
-    let report = await readReport(job.eventId, job.organizerId);
+    const period = {
+      ticketTypeId: job.ticketTypeId ?? undefined,
+      voucherCode: job.voucherCode ?? undefined,
+      fromDate: job.fromDate ?? undefined,
+      toDate: job.toDate ?? undefined,
+    };
+    let report = await readReport(job.eventId, job.organizerId, period, 100000);
     if (!report.summary) {
       await refreshReportViews();
-      report = await readReport(job.eventId, job.organizerId);
+      report = await readReport(job.eventId, job.organizerId, period, 100000);
     }
     if (!report.summary) throw new Error("REPORT_NOT_REFRESHED");
     const summary = report.summary;
@@ -92,6 +101,12 @@ export async function processReportExport(targetId?: string) {
         "refunded_amount",
         "net_revenue",
         "refreshed_at",
+        "from_date",
+        "to_date",
+        "timezone",
+        "refund_basis",
+        "ticket_type_id_filter",
+        "voucher_code_filter",
       ],
       [
         "SUMMARY",
@@ -105,6 +120,12 @@ export async function processReportExport(targetId?: string) {
         summary.total_refunded_amount,
         summary.net_revenue,
         summary.refreshed_at,
+        job.fromDate ?? "",
+        job.toDate ?? "",
+        "Asia/Ho_Chi_Minh",
+        "COMPLETION_DATE",
+        job.ticketTypeId ?? "",
+        job.voucherCode ?? "",
       ],
       ...report.sales.map((row) => [
         "TICKET_TYPE_DAY",
@@ -118,6 +139,12 @@ export async function processReportExport(targetId?: string) {
         "",
         "",
         row.refreshed_at,
+        job.fromDate ?? "",
+        job.toDate ?? "",
+        "Asia/Ho_Chi_Minh",
+        "COMPLETION_DATE",
+        job.ticketTypeId ?? "",
+        job.voucherCode ?? "",
       ]),
     ];
     let data: Buffer;
@@ -154,33 +181,53 @@ export async function processReportExport(targetId?: string) {
       await unlink(temp).catch(() => {});
     }
     written = name;
-    const updated = await db
-      .update(reportExports)
-      .set({
-        status: "COMPLETED",
-        fileName: name,
-        errorMessage: null,
-        expiresAt: new Date(Date.now() + 86400000),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(reportExports.id, job.id),
-          eq(reportExports.attemptId, job.attemptId!),
-          eq(reportExports.status, "PROCESSING"),
-        ),
-      )
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      const updated = await tx
+        .update(reportExports)
+        .set({
+          status: "COMPLETED",
+          fileName: name,
+          errorMessage: null,
+          expiresAt: new Date(Date.now() + 86400000),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(reportExports.id, job.id),
+            eq(reportExports.attemptId, job.attemptId!),
+            eq(reportExports.status, "PROCESSING"),
+          ),
+        )
+        .returning();
+      if (updated.length)
+        await tx
+          .insert(outbox)
+          .values({
+            id: job.id,
+            eventType: REPORT_READY,
+            payload: { exportId: job.id },
+          })
+          .onConflictDoNothing();
+      return updated;
+    });
     if (!updated.length) await unlink(exportFilePath(name)).catch(() => {});
-  } catch {
+  } catch (error) {
     if (written) await unlink(exportFilePath(written)).catch(() => {});
     const retry = job.retryCount + 1;
+    const response =
+      error instanceof HttpException ? error.getResponse() : null;
+    const tooLarge =
+      response !== null &&
+      typeof response === "object" &&
+      "code" in response &&
+      response.code === "REPORT_TOO_LARGE";
+    const code = tooLarge ? "REPORT_TOO_LARGE" : "EXPORT_FAILED";
     await db
       .update(reportExports)
       .set({
-        status: retry >= 3 ? "FAILED" : "PENDING",
+        status: tooLarge || retry >= 3 ? "FAILED" : "PENDING",
         retryCount: retry,
-        errorMessage: "EXPORT_FAILED",
+        errorMessage: code,
         nextRetryAt: new Date(Date.now() + 2000 * 2 ** retry),
         updatedAt: new Date(),
       })

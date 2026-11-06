@@ -6,6 +6,7 @@ import {
   text,
   timestamp,
   index,
+  date,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { events } from "./events";
@@ -24,6 +25,10 @@ export const reportExports = pgTable(
       .notNull()
       .references(() => events.id),
     format: varchar("format", { length: 10 }).notNull(),
+    ticketTypeId: uuid("ticket_type_id"),
+    voucherCode: varchar("voucher_code", { length: 50 }),
+    fromDate: date("from_date"),
+    toDate: date("to_date"),
     status: varchar("status", { length: 20 }).notNull().default("PENDING"),
     attemptId: uuid("attempt_id"),
     fileName: varchar("file_name", { length: 100 }),

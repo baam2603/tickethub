@@ -1,7 +1,16 @@
-import { ForbiddenException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { db } from "../database/db";
-import { events, organizerProfiles, users } from "../database/schema";
+import {
+  events,
+  organizerProfiles,
+  users,
+  ticketTypes,
+} from "../database/schema";
 export async function requireOrganizer(userId: string) {
   const [row] = await db
     .select({ profile: organizerProfiles })
@@ -25,4 +34,26 @@ export async function requireEvent(userId: string, eventId: string) {
   });
   if (!event) throw new NotFoundException("EVENT_NOT_FOUND");
   return { profile, event };
+}
+
+export async function requireReportEvent(
+  userId: string,
+  eventId: string,
+  ticketTypeId?: string,
+) {
+  const result = await requireEvent(userId, eventId);
+  if (
+    ticketTypeId &&
+    !(await db.query.ticketTypes.findFirst({
+      where: and(
+        eq(ticketTypes.id, ticketTypeId),
+        eq(ticketTypes.eventId, eventId),
+      ),
+    }))
+  )
+    throw new BadRequestException({
+      code: "INVALID_TICKET_TYPE",
+      message: "Hang ve khong thuoc su kien.",
+    });
+  return result;
 }

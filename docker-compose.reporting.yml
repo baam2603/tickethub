@@ -1,0 +1,45 @@
+# Chay cung docker-compose.yml. API va worker dung cung image va volume.
+# Tao .env.reporting theo docs/testing/w05-be2-integration.md truoc khi chay.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tickethub-api:local
+    restart: unless-stopped
+    init: true
+    env_file: .env.reporting
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      REPORT_EXPORT_DIR: /app/report-exports
+    ports:
+      - "4000:4000"
+    volumes:
+      - report_exports:/app/report-exports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  report-worker:
+    image: tickethub-api:local
+    command: ["node", "dist/jobs/report.worker.js"]
+    restart: unless-stopped
+    init: true
+    env_file: .env.reporting
+    environment:
+      NODE_ENV: production
+      REPORT_EXPORT_DIR: /app/report-exports
+    volumes:
+      - report_exports:/app/report-exports
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    # Worker khong mo HTTP server; healthcheck HTTP cua image chi danh cho API.
+    healthcheck:
+      disable: true
+volumes:
+  report_exports:

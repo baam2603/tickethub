@@ -31,6 +31,8 @@ ENV PORT=4000
 
 COPY --from=builder --chown=node:node /app/pruned /app
 
+RUN mkdir -p /app/report-exports && chown node:node /app/report-exports
+
 USER node
 EXPOSE 4000
 

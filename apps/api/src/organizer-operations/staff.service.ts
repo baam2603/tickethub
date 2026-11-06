@@ -78,7 +78,7 @@ export class StaffService {
       .innerJoin(organizerStaff, eq(organizerStaff.userId, users.id))
       .where(eq(organizerStaff.organizerId, profile.id))
       .orderBy(desc(users.createdAt), desc(users.id))
-      .limit(page.limit)
+      .limit(page.limit + 1)
       .offset((page.page - 1) * page.limit);
   }
   async update(userId: string, staffId: string, input: StaffUpdate) {
@@ -135,14 +135,15 @@ export class StaffService {
       return gate!;
     });
   }
-  async listGates(userId: string, eventId: string) {
+  async listGates(userId: string, eventId: string, page: Page) {
     await requireEvent(userId, eventId);
     return db
       .select()
       .from(gates)
       .where(eq(gates.eventId, eventId))
       .orderBy(gates.name, gates.id)
-      .limit(100);
+      .limit(page.limit + 1)
+      .offset((page.page - 1) * page.limit);
   }
   async assign(
     userId: string,
@@ -193,7 +194,7 @@ export class StaffService {
       return assignment;
     });
   }
-  async assignments(userId: string, eventId: string) {
+  async assignments(userId: string, eventId: string, page: Page) {
     await requireEvent(userId, eventId);
     return db
       .select({
@@ -208,7 +209,8 @@ export class StaffService {
       .innerJoin(users, eq(users.id, eventStaff.userId))
       .where(eq(eventStaff.eventId, eventId))
       .orderBy(users.fullName, users.id)
-      .limit(100);
+      .limit(page.limit + 1)
+      .offset((page.page - 1) * page.limit);
   }
   async unassign(userId: string, eventId: string, staffId: string) {
     await requireEvent(userId, eventId);

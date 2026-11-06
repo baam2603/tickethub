@@ -24,7 +24,7 @@ pnpm --filter @tickethub/api start:report-worker --once
 
 Worker refresh MV mỗi 5 phút, claim job bằng FOR UPDATE SKIP LOCKED, tạo CSV/XLSX ngoài HTTP request. Nếu sự kiện mới chưa có trong MV, worker refresh trước khi xuất. Quá trình bị dừng được claim lại sau 5 phút. attempt_id ngăn worker cũ ghi đè kết quả worker mới. Lỗi thử tối đa 3 lượt với backoff; sau đó FAILED.
 
-REPORT_EXPORT_DIR là thư mục lưu file riêng, mặc định tmp/report-exports so với thư mục làm việc của tiến trình. API và worker phải dùng cùng đường dẫn tuyệt đối và volume khi triển khai nhiều container. Không dùng thư mục public. Hạn tải 24 giờ; worker dọn file hết hạn. Với hạ tầng không có shared volume cần chuyển phần lưu file sang object storage trước khi triển khai phân tán.
+REPORT_EXPORT_DIR là thư mục lưu file riêng, development mặc định tmp/report-exports so với thư mục làm việc; production yêu cầu cấu hình đường dẫn tuyệt đối. API và worker phải dùng cùng đường dẫn tuyệt đối và volume khi triển khai nhiều container. Không dùng thư mục public. Hạn tải 24 giờ; worker dọn file hết hạn. Với hạ tầng không có shared volume cần chuyển phần lưu file sang object storage trước khi triển khai phân tán.
 
 ## Quản lý nhân viên
 
@@ -63,3 +63,7 @@ pnpm.cmd --filter @tickethub/api exec tsx --test test/w05-operations.integration
 ```
 
 Giữ NODE_ENV=test, database riêng có hậu tố _test và Redis database riêng. Không cần bật dev backend cho bộ test này.
+
+## Bản hoàn thiện tích hợp FE1
+
+Xem [hợp đồng và triển khai mới](w05-be2-integration.md) cho bộ lọc ngày/hạng vé/voucher, thống kê toàn sự kiện, phân trang, danh sách job, email outbox và giới hạn xuất nền 100000 dòng. Chạy thêm migration 0004 và 0005.

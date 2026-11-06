@@ -26,6 +26,9 @@ import { parseInput } from "../organizer-operations/operations.controller";
 import {
   ExportSchema,
   PageSchema,
+  ReportPeriodSchema,
+  ReportListSchema,
+  paginated,
 } from "../organizer-operations/operations.schemas";
 import { ReportsService } from "./reports.service";
 import { exportFilePath } from "./export-files";
@@ -39,21 +42,63 @@ export class ReportsController {
   @Get(":eventId/reports") async report(
     @CurrentUser() u: AuthenticatedUser,
     @Param("eventId", new ParseUUIDPipe()) id: string,
+    @Query() query: unknown,
   ) {
-    return { success: true, data: await this.service.report(u.userId, id) };
+    return {
+      success: true,
+      data: await this.service.report(
+        u.userId,
+        id,
+        parseInput(ReportPeriodSchema, query),
+      ),
+    };
+  }
+  @Get(":eventId/reports/buyers") async buyers(
+    @CurrentUser() u: AuthenticatedUser,
+    @Param("eventId", new ParseUUIDPipe()) id: string,
+    @Query() query: unknown,
+  ) {
+    const filter = parseInput(ReportListSchema, query);
+    return {
+      success: true,
+      ...paginated(
+        await this.service.breakdown(u.userId, id, filter, "buyers"),
+        filter,
+      ),
+    };
+  }
+  @Get(":eventId/reports/vouchers") async vouchers(
+    @CurrentUser() u: AuthenticatedUser,
+    @Param("eventId", new ParseUUIDPipe()) id: string,
+    @Query() query: unknown,
+  ) {
+    const filter = parseInput(ReportListSchema, query);
+    return {
+      success: true,
+      ...paginated(
+        await this.service.breakdown(u.userId, id, filter, "vouchers"),
+        filter,
+      ),
+    };
+  }
+  @Get(":eventId/checkins/summary") async checkinSummary(
+    @CurrentUser() u: AuthenticatedUser,
+    @Param("eventId", new ParseUUIDPipe()) id: string,
+  ) {
+    return {
+      success: true,
+      data: await this.service.checkinSummary(u.userId, id),
+    };
   }
   @Get(":eventId/checkins") async history(
     @CurrentUser() u: AuthenticatedUser,
     @Param("eventId", new ParseUUIDPipe()) id: string,
     @Query() query: unknown,
   ) {
+    const page = parseInput(PageSchema, query);
     return {
       success: true,
-      data: await this.service.history(
-        u.userId,
-        id,
-        parseInput(PageSchema, query),
-      ),
+      ...paginated(await this.service.history(u.userId, id, page), page),
     };
   }
   @Post(":eventId/reports/exports") @HttpCode(202) async create(
@@ -61,13 +106,21 @@ export class ReportsController {
     @Param("eventId", new ParseUUIDPipe()) id: string,
     @Body() body: unknown,
   ) {
+    const input = parseInput(ExportSchema, body);
     return {
       success: true,
-      data: await this.service.createExport(
-        u.userId,
-        id,
-        parseInput(ExportSchema, body).format,
-      ),
+      data: await this.service.createExport(u.userId, id, input.format, input),
+    };
+  }
+  @Get(":eventId/reports/exports") async list(
+    @CurrentUser() u: AuthenticatedUser,
+    @Param("eventId", new ParseUUIDPipe()) id: string,
+    @Query() query: unknown,
+  ) {
+    const page = parseInput(PageSchema, query);
+    return {
+      success: true,
+      ...paginated(await this.service.listExports(u.userId, id, page), page),
     };
   }
   @Get(":eventId/reports/exports/:exportId") async status(
@@ -84,6 +137,10 @@ export class ReportsController {
         format: job.format,
         createdAt: job.createdAt,
         expiresAt: job.expiresAt,
+        ticketTypeId: job.ticketTypeId,
+        voucherCode: job.voucherCode,
+        fromDate: job.fromDate,
+        toDate: job.toDate,
         errorMessage: job.errorMessage,
         downloadUrl:
           job.status === "COMPLETED"

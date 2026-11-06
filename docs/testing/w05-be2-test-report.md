@@ -61,3 +61,43 @@ Không thay đổi logic nghiệp vụ trong đợt kiểm thử này. Đã đí
 Log người dùng cho thấy hook before thất bại do mkdtemp('/tmp/...') không tồn tại trên Windows. Cả 13 ca bị cancelled, chưa chạy kiểm tra nghiệp vụ. Cảnh báo Redis xuất hiện khi dọn một kết nối đang bắt tay sau khi setup lỗi.
 
 Đã đổi sang tmpdir()/join(), dùng lazyConnect và await connect trong hook, xử lý lỗi kết nối qua promise, bảo đảm đóng kết nối và chỉ dọn thư mục đã được tạo. Đã chạy lại 13/13 ca thành công với TMPDIR tùy chỉnh có khoảng trắng trên môi trường Linux; chưa có runner Windows để xác nhận trực tiếp. Cần người dùng pull bản sửa và chạy lại PowerShell để xác nhận trên máy Windows.
+
+## Bản hoàn thiện tích hợp FE1 ngày 06/11/2026
+
+Kiểm tra thay đổi sau commit 1829528 trên cùng nhánh BE2. Phần này cập nhật kết quả cho bản mở rộng;
+những kết quả HTTP smoke của commit cũ phía trên vẫn là bằng chứng cho phiên bản cũ.
+
+| Kiểm tra                                                                | Kết quả                                                                                            |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| pnpm test: API                                                          | 209/209 PASS, không skip                                                                           |
+| pnpm test: web                                                          | 28/28 PASS, không skip                                                                             |
+| W05 trên database mới, migrate/seed từ đầu                              | 18/18 PASS, không skip                                                                             |
+| Root PR/CI tests (`node --test --test-isolation=none tests/*.test.mjs`) | 35/35 PASS                                                                                         |
+| Lint, typecheck, format, audit-doc-parity                               | PASS                                                                                               |
+| Build API riêng                                                         | PASS                                                                                               |
+| db:generate                                                             | Không phát sinh schema drift                                                                       |
+| Compose API/worker config                                               | PASS, còn cảnh báo version cũ ở compose gốc                                                        |
+| Build toàn dự án                                                        | Web không tải được Inter/JetBrains Mono từ Google Fonts trong môi trường này; API build riêng PASS |
+
+Ca mới xác nhận qua HTTP và DB thật: biên nửa đêm Việt Nam, kỳ chỉ có hoàn tiền với net âm,
+refund PENDING bị loại, cache không lẫn bộ lọc, hạng vé/voucher trên đơn nhiều hạng,
+phân bổ đến cent, refund theo vé và theo đơn, tổng tiền dashboard/file CSV/XLSX theo cùng bộ lọc,
+khôi phục danh sách job, IDOR, phân trang, thống kê check-in toàn sự kiện và từng cổng.
+Báo cáo 10001 dòng bị giới hạn ở HTTP bằng 422 nhưng xuất nền đủ 10001 dòng dữ liệu.
+Outbox REPORT_EXPORT_COMPLETED được xác nhận sau khi file hoàn tất; không gửi email thật trong test.
+
+Chưa kiểm thử FE1 bằng trình duyệt trên bản BE mới, chưa có xác nhận provider email live,
+chưa kiểm thử ngưỡng 100000 dòng hoặc tải đồng thời production. Phí vẫn NOT_CONFIGURED theo xác nhận của nhóm.
+Chi tiết tích hợp và các bước FE cần cập nhật: [w05-be2-integration.md](w05-be2-integration.md).
+
+### Xác minh Docker và runtime
+
+Docker backend build PASS. Trong môi trường cloud, dùng bản Dockerfile tạm ngoài repository để truyền CA proxy
+và bật Node sử dụng proxy, đồng thời ánh xạ tên proxy về địa chỉ proxy hiện có cho BuildKit.
+Không tắt TLS, không đưa CA/địa chỉ proxy riêng vào image hay Dockerfile được commit.
+Dockerfile trong nhánh chỉ bổ sung thư mục report-exports thuộc user node.
+
+Chạy image với NODE_ENV=production trên database tickethub_w05_fresh_test:
+API /health trả 200, PostgreSQL và Redis healthy; report worker --once kết thúc 0;
+user node ghi/xóa tệp thử trong named volume report-exports thành công. Container và volume smoke được dọn sau kiểm tra.
+Đây là kiểm tra runtime cục bộ, chưa thay thế chạy E2E FE1 hoặc triển khai production.
