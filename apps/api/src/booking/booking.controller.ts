@@ -4,7 +4,6 @@ import {
   Get,
   Body,
   Param,
-  Headers,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -34,7 +33,6 @@ export class BookingController {
   @HttpCode(HttpStatus.CREATED)
   async holdSeats(
     @CurrentUser() user: AuthenticatedUser,
-    @Headers("x-admission-token") admissionToken: string | undefined,
     @Body() body: unknown,
   ) {
     const parseResult = HoldSeatsRequestSchema.safeParse(body);
@@ -53,7 +51,6 @@ export class BookingController {
     const data = await this.bookingService.holdSeats(
       user.userId,
       parseResult.data,
-      admissionToken,
     );
 
     return {

@@ -189,7 +189,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime,
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();
@@ -558,7 +557,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime: endTimeStrict,
         gateOpeningTime: startTimeStrict,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.STRICT,
       })
       .returning();
@@ -660,7 +658,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime: endTimeStrictEligible,
         gateOpeningTime: startTimeStrictEligible,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.STRICT,
       })
       .returning();
@@ -742,7 +739,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime: endTimeStrict,
         gateOpeningTime: startTimeStrict,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.NO_REFUND,
       })
       .returning();
@@ -835,7 +831,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime,
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();

@@ -88,8 +88,6 @@ describe("W03-BE2: Event Read Cache (UC02) Integration Test Suite", () => {
         startTime,
         endTime,
         gateOpeningTime: new Date("2026-12-01T18:00:00.000Z"),
-        maxActiveUsers: 50,
-        isWaitingRoomEnabled: false,
       })
       .returning();
     testEventId = ev.id;

@@ -224,7 +224,6 @@ describe("UC08: Dynamic Rolling QR & Gate Check-in E2E Integration Suite", () =>
         endTime,
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();
@@ -247,7 +246,6 @@ describe("UC08: Dynamic Rolling QR & Gate Check-in E2E Integration Suite", () =>
         endTime,
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();
@@ -270,7 +268,6 @@ describe("UC08: Dynamic Rolling QR & Gate Check-in E2E Integration Suite", () =>
         endTime,
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED, // se chuyen sang SUSPENDED trong test
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();

@@ -3,7 +3,6 @@ import {
   uuid,
   varchar,
   text,
-  boolean,
   integer,
   timestamp,
   jsonb,
@@ -47,10 +46,6 @@ export const events = pgTable(
       .default(EventStatus.DRAFT)
       .$type<EventStatus>(),
     rejectionReason: text("rejection_reason"),
-    isWaitingRoomEnabled: boolean("is_waiting_room_enabled")
-      .notNull()
-      .default(false),
-    maxActiveUsers: integer("max_active_users").notNull().default(200),
     refundPolicyType: varchar("refund_policy_type", { length: 25 })
       .notNull()
       .default(RefundPolicyType.FLEXIBLE)

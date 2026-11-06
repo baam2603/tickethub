@@ -128,8 +128,6 @@ async function seed() {
       endTime,
       gateOpeningTime,
       status: EventStatus.PUBLISHED,
-      isWaitingRoomEnabled: false,
-      maxActiveUsers: 200,
       refundPolicyType: RefundPolicyType.FLEXIBLE,
       refundPolicyRules: [
         { hoursBeforeStart: 72, refundRate: 100 },

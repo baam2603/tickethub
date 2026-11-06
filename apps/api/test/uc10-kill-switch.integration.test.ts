@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import Redis from "ioredis";
 import { eq, inArray } from "drizzle-orm";
-import { JwtService } from "@nestjs/jwt";
 import { Reflector } from "@nestjs/core";
 import {
   BadRequestException,
@@ -43,7 +42,6 @@ import { AdminService } from "../src/admin/admin.service";
 import { AdminController } from "../src/admin/admin.controller";
 import { EventReadCacheService } from "../src/events/event-read-cache.service";
 import { EventsService } from "../src/events/events.service";
-import { WaitingRoomService } from "../src/waiting-room/waiting-room.service";
 import { BookingService } from "../src/booking/booking.service";
 import { TicketsService } from "../src/tickets/tickets.service";
 import { TicketsController } from "../src/tickets/tickets.controller";
@@ -57,7 +55,6 @@ describe("UC10: Emergency Kill Switch & Immutable Audit Log E2E Integration Suit
   let adminController: AdminController;
   let eventCacheService: EventReadCacheService;
   let eventsService: EventsService;
-  let waitingRoomService: WaitingRoomService;
   let bookingService: BookingService;
   let ed25519Service: Ed25519Service;
   let ticketsService: TicketsService;
@@ -130,9 +127,7 @@ describe("UC10: Emergency Kill Switch & Immutable Audit Log E2E Integration Suit
     adminService = new AdminService(eventCacheService);
     adminController = new AdminController(adminService);
 
-    const jwtService = new JwtService({ secret: env.JWT_SECRET });
-    waitingRoomService = new WaitingRoomService(redis, jwtService);
-    bookingService = new BookingService(waitingRoomService, eventCacheService);
+    bookingService = new BookingService(eventCacheService);
 
     ed25519Service = new Ed25519Service();
     ticketsService = new TicketsService(ed25519Service);
@@ -262,7 +257,6 @@ describe("UC10: Emergency Kill Switch & Immutable Audit Log E2E Integration Suit
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED,
         version: 1,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();

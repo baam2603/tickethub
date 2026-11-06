@@ -5,7 +5,6 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
-  ForbiddenException,
 } from "@nestjs/common";
 import { sql, eq, and, or, lt, inArray, asc } from "drizzle-orm";
 import crypto from "crypto";
@@ -26,7 +25,6 @@ import {
   SeatStatus,
   AllocatedSeatItem,
 } from "@tickethub/shared";
-import { WaitingRoomService } from "../waiting-room/waiting-room.service";
 import { EventReadCacheService } from "../events/event-read-cache.service";
 import { SeatStreamService } from "../events/seat-stream.service";
 
@@ -101,9 +99,6 @@ function findContiguousSeats(
 @Injectable()
 export class BookingService {
   constructor(
-    @Inject(WaitingRoomService)
-    private readonly waitingRoomService: WaitingRoomService,
-
     @Inject(EventReadCacheService)
     private readonly eventReadCacheService: EventReadCacheService,
 
@@ -115,7 +110,6 @@ export class BookingService {
   async holdSeats(
     userId: string,
     dto: HoldSeatsRequest,
-    admissionToken?: string,
   ) {
     const event = await db.query.events.findFirst({
       where: eq(events.id, dto.eventId),
@@ -141,39 +135,6 @@ export class BookingService {
           timestamp: new Date().toISOString(),
         },
       });
-    }
-
-    // Kiểm tra hàng chờ ảo nếu sự kiện yêu cầu
-    if (event.isWaitingRoomEnabled) {
-      if (!admissionToken) {
-        throw new ForbiddenException({
-          success: false,
-          error: {
-            code: "MISSING_ADMISSION_TOKEN",
-            message:
-              "Sự kiện đang bật hàng chờ ảo, yêu cầu header X-Admission-Token",
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-
-      const isValidToken = await this.waitingRoomService.verifyAdmissionToken(
-        admissionToken,
-        dto.eventId,
-        userId,
-      );
-
-      if (!isValidToken) {
-        throw new ForbiddenException({
-          success: false,
-          error: {
-            code: "INVALID_ADMISSION_TOKEN",
-            message:
-              "Mã lượt hàng chờ ảo không hợp lệ hoặc đã hết hạn (X-Admission-Token)",
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
     }
 
     // Kiểm tra tổng số lượng vé đặt (tối đa 6 vé)

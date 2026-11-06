@@ -364,8 +364,6 @@ describe("W02-BE1: Auth (UC01) & Event Management (UC07) Verification", () => {
         startTime,
         endTime,
         gateOpeningTime: gateTime,
-        isWaitingRoomEnabled: false,
-        maxActiveUsers: 200,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
         refundPolicyRules: [],
         ticketTypes: [

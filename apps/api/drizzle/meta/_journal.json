@@ -29,6 +29,13 @@
       "when": 1793926304526,
       "tag": "0003_rare_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793928651229,
+      "tag": "0004_faithful_arclight",
+      "breakpoints": true
     }
   ]
 }
