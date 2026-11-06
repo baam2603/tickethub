@@ -11,6 +11,7 @@ import { UploadsModule } from "./uploads/uploads.module";
 import { SearchModule } from "./search/search.module";
 import { RefundsModule } from "./refunds/refunds.module";
 import { TicketsModule } from "./tickets/tickets.module";
+import { VenuesModule } from "./venues/venues.module";
 @Module({
   imports: [
     RedisModule,
@@ -25,6 +26,7 @@ import { TicketsModule } from "./tickets/tickets.module";
     SearchModule,
     RefundsModule,
     TicketsModule,
+    VenuesModule,
   ],
 })
 export class AppModule {}
