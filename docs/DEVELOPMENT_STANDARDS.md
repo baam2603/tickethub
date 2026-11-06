@@ -8,7 +8,7 @@ Tài liệu này quy định các nguyên tắc kiến trúc, quy chuẩn mã ng
 
 Tồn kho vé, phiên giữ chỗ và giao dịch tiền tệ được quản lý tập trung trên PostgreSQL qua database transaction.
 
-Redis được sử dụng cho việc xếp hàng chờ ảo, lưu tạm dữ liệu truy vấn (cache), xuất bản thông điệp thời gian thực (Pub/Sub) và hàng đợi nền BullMQ. Không đưa ra quyết định xác nhận đặt chỗ hay thanh toán dựa trên dữ liệu lưu tạm trong bộ nhớ Redis.
+Redis được sử dụng cho việc giới hạn tần suất (rate limiting), lưu tạm dữ liệu truy vấn (cache), xuất bản thông điệp thời gian thực (Pub/Sub) và hàng đợi nền BullMQ. Không đưa ra quyết định xác nhận đặt chỗ hay thanh toán dựa trên dữ liệu lưu tạm trong bộ nhớ Redis.
 
 ### Cơ chế tự động phân bổ ghế (Auto Seat Allocation) và Kiểm soát tranh chấp
 

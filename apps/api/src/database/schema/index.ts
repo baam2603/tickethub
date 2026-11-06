@@ -11,6 +11,8 @@ export * from "./refunds";
 export * from "./gates";
 export * from "./event-staff";
 export * from "./payouts";
+export * from "./venues";
+export * from "./venue-layouts";
 export * from "./audit-log";
 export * from "./outbox";
 export * from "./idempotency-keys";

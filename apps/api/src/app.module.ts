@@ -4,7 +4,6 @@ import { RedisModule } from "./database/redis.module";
 import { HealthModule } from "./health/health.module";
 import { AuthModule } from "./auth/auth.module";
 import { EventsModule } from "./events/events.module";
-import { WaitingRoomModule } from "./waiting-room/waiting-room.module";
 import { BookingModule } from "./booking/booking.module";
 import { PaymentsModule } from "./payments/payments.module";
 import { AdminModule } from "./admin/admin.module";
@@ -12,6 +11,8 @@ import { UploadsModule } from "./uploads/uploads.module";
 import { SearchModule } from "./search/search.module";
 import { RefundsModule } from "./refunds/refunds.module";
 import { TicketsModule } from "./tickets/tickets.module";
+import { VenuesModule } from "./venues/venues.module";
+import { PayoutsModule } from "./payouts/payouts.module";
 @Module({
   imports: [
     ReportingModule,
@@ -19,7 +20,6 @@ import { TicketsModule } from "./tickets/tickets.module";
     HealthModule,
     AuthModule,
     EventsModule,
-    WaitingRoomModule,
     BookingModule,
     PaymentsModule,
     AdminModule,
@@ -27,6 +27,8 @@ import { TicketsModule } from "./tickets/tickets.module";
     SearchModule,
     RefundsModule,
     TicketsModule,
+    VenuesModule,
+    PayoutsModule,
   ],
 })
 export class AppModule {}

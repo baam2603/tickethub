@@ -189,7 +189,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime,
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();
@@ -339,6 +338,7 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         await refundsController.preview(buyer2User, {
           orderId: order!.id,
           ticketIds: [t1!.id],
+          reason: "Ke hoach ca nhan thay doi",
         });
       },
       (err: unknown) => {
@@ -369,6 +369,7 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         await refundsController.request(buyer1User, "", {
           orderId: order!.id,
           ticketIds: [t1!.id],
+          reason: "Ke hoach ca nhan thay doi",
         });
       },
       (err: unknown) => {
@@ -442,6 +443,7 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
     const replayRes = await refundsController.request(buyer1User, idempKey1, {
       orderId: order!.id,
       ticketIds: [t1!.id],
+      reason: "Ke hoach ca nhan thay doi",
     });
     assert.equal(replayRes.refundId, executeRes1.refundId);
     assert.equal(replayRes.refundAmount, executeRes1.refundAmount);
@@ -460,6 +462,7 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         await refundsController.request(buyer1User, conflictIdempKey, {
           orderId: order!.id,
           ticketIds: [t1!.id],
+          reason: "Ke hoach ca nhan thay doi",
         });
       },
       (err: unknown) => {
@@ -558,7 +561,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime: endTimeStrict,
         gateOpeningTime: startTimeStrict,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.STRICT,
       })
       .returning();
@@ -660,7 +662,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime: endTimeStrictEligible,
         gateOpeningTime: startTimeStrictEligible,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.STRICT,
       })
       .returning();
@@ -742,7 +743,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime: endTimeStrict,
         gateOpeningTime: startTimeStrict,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.NO_REFUND,
       })
       .returning();
@@ -835,7 +835,6 @@ describe("UC06: Ticket Cancellation & Automated Refund Integration Tests", () =>
         endTime,
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();

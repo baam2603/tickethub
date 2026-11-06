@@ -30,6 +30,17 @@ export const EnvSchema = z
       .string()
       .url()
       .default("https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"),
+    VNPAY_API_URL: z
+      .string()
+      .url()
+      .default("https://sandbox.vnpayment.vn/merchant_webapi/api/transaction"),
+    VNPAY_API_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(100)
+      .max(30000)
+      .default(5000),
+    VNPAY_REFUND_IP: z.string().default("127.0.0.1"),
     VNPAY_RETURN_URL: z
       .string()
       .url()

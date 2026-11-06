@@ -26,7 +26,7 @@ export const orders = pgTable(
       .notNull()
       .default("0"),
     finalAmount: numeric("final_amount", { precision: 14, scale: 2 }).notNull(),
-    status: varchar("status", { length: 20 })
+    status: varchar("status", { length: 32 })
       .notNull()
       .default(OrderStatus.PENDING)
       .$type<OrderStatus>(),

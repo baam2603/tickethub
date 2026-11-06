@@ -3,7 +3,6 @@ import {
   uuid,
   varchar,
   text,
-  boolean,
   integer,
   timestamp,
   jsonb,
@@ -12,6 +11,8 @@ import {
 } from "drizzle-orm/pg-core";
 import { EventStatus, RefundPolicyType } from "@tickethub/shared";
 import { organizerProfiles } from "./organizer-profiles";
+import { venues } from "./venues";
+import { venueLayouts } from "./venue-layouts";
 const tsVector = customType<{ data: string }>({
   dataType() {
     return "tsvector";
@@ -24,6 +25,8 @@ export const events = pgTable(
     organizerId: uuid("organizer_id")
       .notNull()
       .references(() => organizerProfiles.id),
+    venueId: uuid("venue_id").references(() => venues.id),
+    venueLayoutId: uuid("venue_layout_id").references(() => venueLayouts.id),
     title: varchar("title", { length: 255 }).notNull(),
     slug: varchar("slug", { length: 255 }).notNull().unique(),
     description: text("description").notNull(),
@@ -43,10 +46,6 @@ export const events = pgTable(
       .default(EventStatus.DRAFT)
       .$type<EventStatus>(),
     rejectionReason: text("rejection_reason"),
-    isWaitingRoomEnabled: boolean("is_waiting_room_enabled")
-      .notNull()
-      .default(false),
-    maxActiveUsers: integer("max_active_users").notNull().default(200),
     refundPolicyType: varchar("refund_policy_type", { length: 25 })
       .notNull()
       .default(RefundPolicyType.FLEXIBLE)

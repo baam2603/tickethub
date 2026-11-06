@@ -57,7 +57,6 @@ Thất bại (`HTTP 4xx` hoặc `5xx`):
 | `NOT_FOUND`              | 404         | Tài nguyên không tồn tại                                 |
 | `SEAT_ALREADY_HELD`      | 409         | Ghế đã có người giữ hoặc đã bán                          |
 | `CONFLICT_VERSION`       | 409         | Xung đột phiên bản dữ liệu khi cập nhật đồng thời        |
-| `WAITING_ROOM_REQUIRED`  | 428         | Sự kiện đang bật hàng chờ, thiếu admission token         |
 | `TOO_MANY_REQUESTS`      | 429         | Gửi yêu cầu vượt quá giới hạn tần suất cho phép          |
 | `INTERNAL_SERVER_ERROR`  | 500         | Lỗi xử lý nội bộ phía máy chủ                            |
 
@@ -307,9 +306,9 @@ Lấy thông tin tồn kho và số lượng vé còn lại của từng hạng 
   }
   ```
 
-#### `GET /api/v1/events/:id/seats/stream` (SSE) [PLANNED]
+#### `GET /api/v1/events/:id/seats/stream` (SSE)
 
-Cập nhật trạng thái ghế theo thời gian thực.
+Cập nhật trạng thái ghế theo thời gian thực qua Redis Pub/Sub.
 
 - Tên sự kiện: `seat_status_changed`
 - Dữ liệu gửi về:
@@ -322,9 +321,9 @@ Cập nhật trạng thái ghế theo thời gian thực.
 }
 ```
 
-### [PLANNED] Địa điểm chuẩn và Sơ đồ SVG (`/venues`)
+### Địa điểm chuẩn và Sơ đồ SVG (`/venues`)
 
-#### [PLANNED] `GET /api/v1/venues`
+#### `GET /api/v1/venues`
 
 Lấy danh mục các địa điểm tổ chức chuẩn (Curated Venues) đã được quản trị viên kiểm duyệt, hỗ trợ lọc theo 3 thành phố lớn, thể loại và tìm kiếm từ khóa.
 
@@ -373,57 +372,17 @@ Lấy danh mục các địa điểm tổ chức chuẩn (Curated Venues) đã �
 }
 ```
 
-#### [PLANNED] `GET /api/v1/venues/:id`
+#### `GET /api/v1/venues/:id`
 
 Lấy chi tiết một địa điểm chuẩn kèm tất cả cấu hình sơ đồ khán đài SVG và phân khu mặc định.
 
 - Response 200: Chi tiết địa điểm và danh sách các layout có sẵn (`layouts` kèm `defaultZones`).
 
-#### [PLANNED] `GET /api/v1/venues/:id/layouts`
+#### `GET /api/v1/venues/:id/layouts`
 
 Lấy danh sách các mẫu sơ đồ khán đài của địa điểm kèm danh sách `defaultZones` tương thích với `data-zone` trong tệp SVG.
 
 - Response 200: Danh sách sơ đồ khán đài kiến trúc kèm ước lượng sức chứa và cấu hình phân khu.
-
-### Hàng chờ ảo (`/waiting-room`)
-
-#### `POST /api/v1/waiting-room/:eventId/join`
-
-Gia nhập hàng chờ trước khi vào màn hình giữ chỗ và mua vé.
-
-- Header: `Authorization: Bearer <accessToken>`
-- Response 200 (khi số người mua vé đồng thời còn dưới ngưỡng `MAX_ACTIVE`):
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "ADMITTED",
-    "admissionToken": "jwt_token_valid_10_minutes"
-  }
-}
-```
-
-- Response 202 (khi phải xếp hàng):
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "QUEUED",
-    "queuePosition": 142,
-    "estimatedWaitSeconds": 90,
-    "queueId": "q_user_uuid_event_uuid"
-  }
-}
-```
-
-#### `POST /api/v1/waiting-room/:eventId/heartbeat`
-
-Gửi tín hiệu duy trì vị trí hàng chờ mỗi 15 giây.
-
-- Request body: `{ "queueId": "q_user_uuid_event_uuid" }`
-- Response 200: `{ "success": true, "data": { "queuePosition": 120, "estimatedWaitSeconds": 75 } }`
 
 ### Đặt và giữ chỗ vé (`/booking`)
 
@@ -435,7 +394,6 @@ Giữ chỗ vé trong thời hạn 5 phút với cơ chế tự động phân b�
 - Header:
   - `Authorization: Bearer <accessToken>`
   - `Idempotency-Key: <UUID>`
-  - `X-Admission-Token: <token>` (khi sự kiện bật hàng chờ)
 - Cơ chế phân bổ: Người mua chọn hạng vé (`ticketTypeId`) và số lượng vé (`quantity`). Hệ thống tự động tìm và cấp các ghế còn trống liền kề trong cùng một hàng. Nếu hàng bị phân mảnh, hệ thống tự động quét và ưu tiên hàng có đủ ghế liền kề tiếp theo trong cùng hạng vé.
 - Request body:
 
@@ -558,8 +516,10 @@ Xem chi tiết chuyên sâu của một đơn hàng.
 
 Khởi tạo giao dịch thanh toán VNPay và nhận URL chuyển hướng đến cổng thanh toán VNPay.
 
-- Header: `Authorization: Bearer <accessToken>`
-- Response 200:
+- Header: `Authorization: Bearer <accessToken>`, tùy chọn `Idempotency-Key: <UUID>`.
+- Số tiền chỉ lấy từ đơn và chi tiết đơn trong PostgreSQL, kiểm tra tổng tiền trừ giảm giá đã được server lưu. API này không tiếp nhận giá hoặc tự phê duyệt voucher từ client.
+- Chỉ chủ đơn PENDING còn trên 45 giây giữ chỗ được tạo URL. Gọi lại tái sử dụng transaction và URL đã lưu; hạn URL bằng hạn giữ chỗ.
+- Response 201:
   ```json
   {
     "success": true,
@@ -569,12 +529,27 @@ Khởi tạo giao dịch thanh toán VNPay và nhận URL chuyển hướng đ�
   }
   ```
 
+#### `POST /api/v1/payments/orders/:orderId/vnpay/query`
+
+Đối soát QueryDR khi client chưa nhận được kết quả IPN.
+
+- Header: `Authorization: Bearer <accessToken>`. Chỉ chủ sở hữu đơn được gọi.
+- Không nhận số tiền, merchant, URL hoặc mã giao dịch do client cung cấp.
+- Response 201: `{ "success": true, "data": { "decision": "APPLY_SUCCESS", "responseCode": "00" } }`.
+- `ALREADY_PROCESSED`: giao dịch đã được xử lý; `MANUAL_REVIEW`: kết quả chưa xác định; `AMOUNT_MISMATCH`: không khớp tiền.
+- HTTP 400 nếu giao dịch cũ thiếu ngày tạo VNPay; HTTP 404 nếu không có giao dịch thuộc người gọi; HTTP 503 nếu VNPay lỗi, timeout hoặc phản hồi không xác minh được.
+- Chỉ phản hồi QueryDR loại thanh toán `01` được đưa vào xử lý đơn. Kết quả hoàn tiền `02`/`03` không được dùng để cấp vé.
+
 #### `GET /api/v1/payments/vnpay/ipn`
 
 Endpoint nhận webhook IPN (Instant Payment Notification) từ cổng thanh toán VNPay để cập nhật trạng thái đơn hàng thành công.
 
 - Tham số: Toàn bộ query params từ VNPay (`vnp_TxnRef`, `vnp_Amount`, `vnp_ResponseCode`, `vnp_SecureHash`, ...)
-- Response 200: `{"RspCode": "00", "Message": "Confirm Success"}`
+- Cần bật `ENABLE_VNPAY_IPN_PROCESSING=true`; mặc định endpoint tắt.
+- Xác minh HMAC-SHA512, merchant, số tiền trước khi cập nhật; khóa order rồi transaction trong cùng transaction DB.
+- IPN thành công đến muộn với đủ metadata: khôi phục toàn bộ vé nếu còn trống; nếu không đủ kho thì rollback phần khôi phục và chuyển đơn sang `PAYMENT_EXPIRED_REFUND_PENDING`, tạo một refund cùng sự kiện outbox `REFUND_REQUESTED`. Không gọi API hoàn tiền trong transaction DB.
+- Giao dịch cũ thiếu ngày tạo, mã giao dịch VNPay hoặc ngày thanh toán hợp lệ được giữ ở `MANUAL_REVIEW` để tránh tự động xử lý dựa trên bằng chứng thiếu.
+- Response 200: `{"RspCode": "00", "Message": "Confirm Success"}`; callback lặp trả `02`, sai chữ ký `97`, sai tiền `04`, không có đơn `01`, cần đối soát `99`.
 
 #### `GET /api/v1/internal/vnpay/ipn-preview`
 
@@ -781,9 +756,9 @@ Tra cứu thủ công vé dự phòng bằng mã vé tĩnh 32 ký tự kết h�
 }
 ```
 
-### [PLANNED] Hủy vé và hoàn tiền (`/refund`)
+### Hủy vé và hoàn tiền (`/refund`)
 
-#### [PLANNED] `POST /api/v1/refund/preview`
+#### `POST /api/v1/refund/preview`
 
 Tính trước số tiền hoàn lại theo chính sách trước khi xác nhận.
 
@@ -803,7 +778,7 @@ Tính trước số tiền hoàn lại theo chính sách trước khi xác nhậ
 }
 ```
 
-#### [PLANNED] `POST /api/v1/refund/request`
+#### `POST /api/v1/refund/request`
 
 Gửi yêu cầu hủy vé.
 
@@ -1066,19 +1041,53 @@ Truy vấn danh sách lịch sử kiểm toán bất biến theo sự kiện ph�
 }
 ```
 
-#### [PLANNED] `GET /api/v1/admin/reconciliations`
+#### `GET /api/v1/admin/reconciliations`
 
-Lấy danh sách đối soát giao dịch với dữ liệu VNPay.
+Lấy danh sách đối soát giao dịch giữa đơn hàng hệ thống và dữ liệu thanh toán VNPay.
 
-- Response 200: Danh sách giao dịch khớp và các bản ghi phát hiện chênh lệch.
+- Header: `Authorization: Bearer <adminToken>`
+- Query params: `eventId` (tùy chọn), `status` (`ALL`, `MATCHED`, `AMOUNT_MISMATCH`, `MISSING_TRANSACTION`, `ORPHAN_TRANSACTION`), `page`, `limit`
+- Response 200: Danh sách giao dịch đối soát, phân loại trạng thái và khối thống kê tổng hợp `summary`.
 
-#### [PLANNED] `POST /api/v1/admin/payouts/:id/approve`
+#### `GET /api/v1/admin/payouts`
+
+Lấy danh sách các lệnh quyết toán chi trả doanh thu cho Ban tổ chức trên toàn hệ thống.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Query params: `status` (`PENDING`, `HOLD`, `PAID_OUT`), `organizerId`, `eventId`, `page`, `limit`
+- Response 200: Danh sách lệnh chi trả kèm thông tin sự kiện và phân trang.
+
+#### `POST /api/v1/admin/payouts/generate`
+
+Tính toán doanh thu sự kiện, khấu trừ tiền hoàn vé, phí sàn (5%) và phí cổng VNPay (1.5%) để tạo hoặc cập nhật lệnh quyết toán ở trạng thái `PENDING`.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Request body: `{ "eventId": "uuid-event" }`
+- Response 200: Thông tin chi tiết lệnh quyết toán đã tính toán.
+
+#### `POST /api/v1/admin/payouts/:id/approve`
 
 Xác nhận phê duyệt lệnh chi trả tiền bán vé cho ban tổ chức.
 
-- Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT`.
+- Header: `Authorization: Bearer <adminToken>`
+- Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT` và ghi vết kiểm toán vào `audit_log`.
 
-#### [PLANNED] `POST /api/v1/admin/venues`
+#### `POST /api/v1/admin/payouts/:id/hold`
+
+Tạm giữ lệnh chi trả khi phát hiện khiếu nại hoặc tranh chấp vé.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Request body: `{ "reason": "Phát hiện đơn hàng tranh chấp đang khiếu nại" }`
+- Response 200: Lệnh chi trả chuyển trạng thái `HOLD` kèm lý do.
+
+#### `POST /api/v1/admin/payouts/:id/recalculate`
+
+Tính toán lại các con số doanh thu, tiền hoàn và phí cho lệnh chi trả đang ở trạng thái `PENDING` hoặc `HOLD`.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Response 200: Lệnh chi trả với các con số cập nhật mới nhất.
+
+#### `POST /api/v1/admin/venues`
 
 Quản trị viên tạo mới hoặc nhập một địa điểm tổ chức chuẩn vào hệ thống.
 
@@ -1112,7 +1121,7 @@ Quản trị viên tạo mới hoặc nhập một địa điểm tổ chức ch
 }
 ```
 
-#### [PLANNED] `POST /api/v1/admin/venues/:id/layouts`
+#### `POST /api/v1/admin/venues/:id/layouts`
 
 Quản trị viên liên kết mẫu sơ đồ SVG đã chuẩn hóa (hoặc tải lên SVG mới) cho địa điểm tổ chức.
 
@@ -1156,7 +1165,7 @@ Quản trị viên liên kết mẫu sơ đồ SVG đã chuẩn hóa (hoặc t�
 }
 ```
 
-#### [PLANNED] `PUT /api/v1/admin/venues/:id`
+#### `PUT /api/v1/admin/venues/:id`
 
 Quản trị viên cập nhật thông tin địa điểm hoặc tạm ngưng khả dụng.
 
@@ -1277,6 +1286,14 @@ Ban tổ chức nộp sự kiện để quản trị viên phê duyệt (chuyể
 
 - Header: `Authorization: Bearer <organizerToken>`
 - Response 200: Sự kiện chuyển trạng thái chờ duyệt
+
+#### `GET /api/v1/organizer/payouts`
+
+Ban tổ chức tra cứu danh sách các khoản quyết toán chi trả của các sự kiện do chính mình sở hữu.
+
+- Header: `Authorization: Bearer <organizerToken>`
+- Query params: `page`, `limit`
+- Response 200: Danh sách các lệnh chi trả kèm số tiền thực nhận (`netPayout`) và trạng thái.
 
 ---
 
@@ -1419,3 +1436,8 @@ HTTP tối đa 10000 dòng, vượt trả 422 REPORT_TOO_LARGE và hướng sang
 vượt trả job FAILED REPORT_TOO_LARGE, không xuất thiếu dòng. Giới hạn mới thay thế giới hạn export 10000 dòng phía trên.
 Danh sách staff, cổng, phân công, checkins và exports giữ data dạng mảng, thêm meta page/limit/hasMore.
 Outbox REPORT_EXPORT_COMPLETED được ghi nguyên tử với hoàn tất job; gửi email cần cấu hình riêng, link vào FE có xác thực.
+### Search W03: xử lý keyword và độ liên quan
+
+Keyword được trim/normalize NFC. Keyword dưới hai ký tự bỏ điều kiện full-text nhưng vẫn áp dụng bộ lọc.
+Keyword hợp lệ ưu tiên ts_rank giảm dần, sau đó startTime/id tăng dần; cursor theo cùng thứ tự để tránh mất/trùng kết quả.
+Không phục hồi UC03 hoặc admission token.

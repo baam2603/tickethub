@@ -55,6 +55,7 @@ export const OrderStatus = {
   FAILED: "FAILED",
   CANCELLED: "CANCELLED",
   REFUNDED: "REFUNDED",
+  PAYMENT_EXPIRED_REFUND_PENDING: "PAYMENT_EXPIRED_REFUND_PENDING",
 } as const;
 export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus];
 

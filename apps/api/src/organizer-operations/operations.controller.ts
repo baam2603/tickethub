@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -13,7 +12,8 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
-import { z } from "zod";
+import { parseInput } from "../common/parse-input";
+export { parseInput } from "../common/parse-input";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { Roles } from "../auth/decorators/roles.decorator";
@@ -31,15 +31,6 @@ import {
   StaffCreateSchema,
   StaffUpdateSchema,
 } from "./operations.schemas";
-export function parseInput<T>(schema: z.ZodType<T>, value: unknown): T {
-  const result = schema.safeParse(value);
-  if (!result.success)
-    throw new BadRequestException({
-      code: "VALIDATION_ERROR",
-      details: result.error.flatten(),
-    });
-  return result.data;
-}
 @Controller("api/v1/organizer")
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles("ORGANIZER")

@@ -3,11 +3,7 @@ const BACKEND_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://localhost:4000/api/v1";
 
-const FORWARDED_HEADERS = [
-  "authorization",
-  "x-admission-token",
-  "idempotency-key",
-] as const;
+const FORWARDED_HEADERS = ["authorization", "idempotency-key"] as const;
 
 /**
  * Chuyển tiếp nguyên trạng yêu cầu booking tới backend NestJS.

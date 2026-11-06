@@ -166,7 +166,6 @@ describe("TicketsService Gate Check-in Tests", () => {
         endTime,
         gateOpeningTime: startTime,
         status: EventStatus.PUBLISHED,
-        isWaitingRoomEnabled: false,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
       .returning();

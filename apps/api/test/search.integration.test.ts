@@ -84,8 +84,6 @@ describe("W03-BE2: Event Full-Text Search (UC02) Integration Test Suite", () => 
         startTime: new Date("2026-11-10T19:00:00.000Z"),
         endTime: new Date("2026-11-10T22:00:00.000Z"),
         gateOpeningTime: new Date("2026-11-10T18:00:00.000Z"),
-        maxActiveUsers: 100,
-        isWaitingRoomEnabled: false,
       })
       .returning();
     event1Id = ev1.id;
@@ -135,8 +133,6 @@ describe("W03-BE2: Event Full-Text Search (UC02) Integration Test Suite", () => 
         startTime: new Date("2026-11-15T08:00:00.000Z"),
         endTime: new Date("2026-11-15T17:00:00.000Z"),
         gateOpeningTime: new Date("2026-11-15T07:30:00.000Z"),
-        maxActiveUsers: 100,
-        isWaitingRoomEnabled: false,
       })
       .returning();
     event2Id = ev2.id;
@@ -182,8 +178,6 @@ describe("W03-BE2: Event Full-Text Search (UC02) Integration Test Suite", () => 
         startTime: new Date("2026-11-20T05:00:00.000Z"),
         endTime: new Date("2026-11-20T11:00:00.000Z"),
         gateOpeningTime: new Date("2026-11-20T04:30:00.000Z"),
-        maxActiveUsers: 100,
-        isWaitingRoomEnabled: false,
       })
       .returning();
     event3Id = ev3.id;

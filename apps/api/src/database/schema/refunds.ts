@@ -23,6 +23,11 @@ export const refunds = pgTable("refunds", {
     .notNull()
     .default(RefundStatus.PENDING)
     .$type<RefundStatus>(),
+  providerRequestId: varchar("provider_request_id", { length: 32 }).unique(),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  nextRetryAt: timestamp("next_retry_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
   providerRefundRef: varchar("provider_refund_ref", { length: 100 }),
   idempotencyKey: varchar("idempotency_key", { length: 100 })
     .notNull()

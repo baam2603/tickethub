@@ -153,7 +153,7 @@ export function computeRemainingSeconds(
 
 export interface HoldErrorInfo {
   message: string;
-  action: "LOGIN" | "WAITING_ROOM" | "REFRESH" | "RETRY" | "NONE";
+  action: "LOGIN" | "REFRESH" | "RETRY" | "NONE";
 }
 
 /**
@@ -172,16 +172,6 @@ export function getHoldErrorInfo(
         action: "LOGIN",
       };
     case 403:
-      if (
-        code === "MISSING_ADMISSION_TOKEN" ||
-        code === "INVALID_ADMISSION_TOKEN"
-      ) {
-        return {
-          message:
-            "Sự kiện đang bật hàng chờ ảo. Vui lòng xếp hàng để được vào chọn vé.",
-          action: "WAITING_ROOM",
-        };
-      }
       return {
         message:
           serverMessage ??

@@ -25,6 +25,7 @@ import {
 import { db } from "../database/db";
 import {
   orders,
+  orderItems,
   tickets,
   seats,
   ticketTypes,
@@ -41,6 +42,7 @@ import {
   type TicketToRefund,
 } from "./refund-calculator";
 import { EventReadCacheService } from "../events/event-read-cache.service";
+import { SeatStreamService } from "../events/seat-stream.service";
 
 @Injectable()
 export class RefundsService {
@@ -48,6 +50,10 @@ export class RefundsService {
     @Optional()
     @Inject(EventReadCacheService)
     private readonly eventReadCacheService?: EventReadCacheService,
+
+    @Optional()
+    @Inject(SeatStreamService)
+    private readonly seatStreamService?: SeatStreamService,
   ) {}
 
   /**
@@ -126,13 +132,24 @@ export class RefundsService {
       0,
     );
 
+    const purchased = await db
+      .select()
+      .from(orderItems)
+      .where(eq(orderItems.orderId, order.id));
     const ticketsToRefund: TicketToRefund[] = requestedTickets.map((t) => ({
       ticketId: t.id,
       ticketCode: t.ticketCode,
       seatLabel: t.seat
         ? `Hàng ${t.seat.rowLabel} - Ghế ${t.seat.seatNumber}`
         : t.ticketType?.name || "GA",
-      unitPrice: Number(t.ticketType?.price || 0),
+      unitPrice: Number(
+        purchased.find(
+          (item) =>
+            item.ticketTypeId === t.ticketTypeId && item.seatId === t.seatId,
+        )?.unitPrice ??
+          t.ticketType?.price ??
+          0,
+      ),
     }));
 
     const breakdown = calculateTicketRefundBreakdown({
@@ -259,13 +276,25 @@ export class RefundsService {
         .from(ticketTypes)
         .where(inArray(ticketTypes.id, ttIds));
       const ttMap = new Map(ttRows.map((tt) => [tt.id, tt]));
+      const purchased = await tx
+        .select()
+        .from(orderItems)
+        .where(eq(orderItems.orderId, order.id));
 
       const ticketsToRefund: TicketToRefund[] = requestedTickets.map((t) => {
         const tt = ttMap.get(t.ticketTypeId);
         return {
           ticketId: t.id,
           ticketCode: t.ticketCode,
-          unitPrice: Number(tt?.price || 0),
+          unitPrice: Number(
+            purchased.find(
+              (item) =>
+                item.ticketTypeId === t.ticketTypeId &&
+                item.seatId === t.seatId,
+            )?.unitPrice ??
+              tt?.price ??
+              0,
+          ),
         };
       });
 
@@ -437,6 +466,30 @@ export class RefundsService {
         .limit(1);
       if (order?.eventId) {
         await this.eventReadCacheService.invalidate(order.eventId);
+      }
+    }
+
+    // Phát sự kiện cập nhật trạng thái ghế thời gian thực qua Redis Pub/Sub
+    if (this.seatStreamService) {
+      const seatRows = await db
+        .select({ seatId: tickets.seatId, eventId: tickets.eventId })
+        .from(tickets)
+        .where(inArray(tickets.id, dto.ticketIds));
+
+      const seatsByEvent = new Map<string, string[]>();
+      for (const r of seatRows) {
+        if (r.seatId && r.eventId) {
+          const list = seatsByEvent.get(r.eventId) || [];
+          list.push(r.seatId);
+          seatsByEvent.set(r.eventId, list);
+        }
+      }
+      for (const [eventId, seatIds] of seatsByEvent.entries()) {
+        await this.seatStreamService?.publishSeatStatusChanged(eventId, {
+          seatIds,
+          status: "AVAILABLE",
+          expiresAt: null,
+        });
       }
     }
 
