@@ -56,11 +56,11 @@ describe("RefundsController Unit Tests", () => {
 
   it("successfully previews refund", async () => {
     const res = await controller.preview(mockUser, {
-      orderId: "order-123",
-      ticketIds: ["tkt-1"],
+      orderId: "00000000-0000-4000-8000-000000000001",
+      ticketIds: ["00000000-0000-4000-8000-000000000002"],
     });
 
-    assert.equal(res.orderId, "order-123");
+    assert.equal(res.orderId, "00000000-0000-4000-8000-000000000001");
     assert.equal(res.totalRefundAmount, 2500000);
   });
 
@@ -68,8 +68,8 @@ describe("RefundsController Unit Tests", () => {
     await assert.rejects(
       async () => {
         await controller.request(mockUser, "", {
-          orderId: "order-123",
-          ticketIds: ["tkt-1"],
+          orderId: "00000000-0000-4000-8000-000000000001",
+          ticketIds: ["00000000-0000-4000-8000-000000000002"],
           reason: "Bận việc đột xuất",
         });
       },
@@ -83,8 +83,8 @@ describe("RefundsController Unit Tests", () => {
 
   it("successfully executes refund when Idempotency-Key header is present", async () => {
     const res = await controller.request(mockUser, "idem-key-123", {
-      orderId: "order-123",
-      ticketIds: ["tkt-1"],
+      orderId: "00000000-0000-4000-8000-000000000001",
+      ticketIds: ["00000000-0000-4000-8000-000000000002"],
       reason: "Bận việc đột xuất",
     });
 

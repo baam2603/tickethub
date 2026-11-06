@@ -890,7 +890,7 @@ Hàng đợi xuất báo cáo bền vững trong PostgreSQL; dữ liệu file n�
 | created_at    | TIMESTAMPTZ  | NOT NULL                        | Ngày tạo                           |
 | updated_at    | TIMESTAMPTZ  | NOT NULL                        | Ngày cập nhật/lease                |
 
-Migration 0003_w05-staff-reporting.sql tạo MV thực tế: mv_event_sales_summary và mv_event_ticket_sales. Migration tổng hợp riêng orders, refunds, tickets trước khi join, tránh nhân doanh thu khi đơn có nhiều vé hoặc nhiều refund. Worker refresh hai MV bằng CONCURRENTLY dưới advisory lock để tránh nhiều worker refresh trùng. MV không được ánh xạ thành pgTable vì chỉ đọc qua SQL tĩnh.
+Migration tích hợp 0005_integrate-w03-w05.sql tạo MV thực tế: mv_event_sales_summary và mv_event_ticket_sales. Migration tổng hợp riêng orders, refunds, tickets trước khi join, tránh nhân doanh thu khi đơn có nhiều vé hoặc nhiều refund. Worker refresh hai MV bằng CONCURRENTLY dưới advisory lock để tránh nhiều worker refresh trùng. MV không được ánh xạ thành pgTable vì chỉ đọc qua SQL tĩnh.
 
 ### Mở rộng report_exports và MV báo cáo (0004, 0005)
 
@@ -908,3 +908,11 @@ Phân bổ giữ tổng tiền chính xác đến cent; hoàn theo vé không nh
 Worker refresh cả bốn MV trong cùng transaction repeatable read/advisory lock; unique index hỗ trợ CONCURRENTLY.
 MV chỉ đọc qua SQL, không ánh xạ thành pgTable. Hoàn tất file ghi outbox REPORT_EXPORT_COMPLETED trong cùng transaction;
 không thêm PII vào payload outbox, chỉ exportId.
+
+## Schema tích hợp tuần 3, 4, 5
+
+unstable giữ 18 bảng nền, gồm venues và venue_layouts, thêm organizer_staff, gate_checkin_logs và report_exports:
+21 BASE TABLE trong public, không tính drizzle.__drizzle_migrations hoặc bốn Materialized View.
+0000-0004 của unstable giữ nguyên. Migration 0005_integrate-w03-w05.sql thêm schema W04/W05 theo cách kiểm tra tồn tại,
+hỗ trợ DB cũ của các nhánh W04/W05; chỉ dựng lại MV khi cần mở rộng orders.status lên varchar(32).
+Các bảng nghiệp vụ không bị xóa. Các mốc waiting room đã bị loại bỏ theo AGENTS.

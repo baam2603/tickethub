@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, sql, inArray } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import {
   OrderStatus,
@@ -418,14 +418,28 @@ export class VnpayIpnService {
           .filter((id): id is string => id !== null && id !== undefined);
 
         if (seatIds.length > 0) {
-          await this.seatStreamService?.publishSeatStatusChanged(
-            affectedOrder.eventId,
-            {
-              seatIds,
-              status: decision === "APPLY_SUCCESS" ? "SOLD" : "AVAILABLE",
-              expiresAt: null,
-            },
-          );
+          // IPN muon co the mat ghe vao tay don khac. Phat trang thai DB that,
+          // khong gan AVAILABLE chi vi don cu duoc dua vao hang doi hoan tien.
+          const currentSeats = await db
+            .select({
+              id: seats.id,
+              status: seats.status,
+              holdExpiresAt: seats.holdExpiresAt,
+            })
+            .from(seats)
+            .where(inArray(seats.id, seatIds));
+          for (const seat of currentSeats)
+            await this.seatStreamService?.publishSeatStatusChanged(
+              affectedOrder.eventId,
+              {
+                seatIds: [seat.id],
+                status: seat.status,
+                expiresAt:
+                  seat.status === SeatStatus.HELD
+                    ? (seat.holdExpiresAt?.toISOString() ?? null)
+                    : null,
+              },
+            );
         }
       }
     }

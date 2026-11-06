@@ -59,7 +59,11 @@ export async function processRefund(refundId: string, api: VnpayApi) {
       )
         throw new Error("Invalid late refund state");
     } else {
-      if (order.status !== OrderStatus.PAID)
+      if (
+        ![OrderStatus.PAID, OrderStatus.REFUNDED].some(
+          (status) => status === order.status,
+        )
+      )
         throw new Error("Refund order is not paid");
       const revoked = await tx
         .select()
@@ -131,10 +135,10 @@ export async function processRefund(refundId: string, api: VnpayApi) {
       .set({
         status: RefundStatus.PROCESSING,
         providerRequestId: requestId,
-        lastAttemptAt: send ? new Date() : refund.lastAttemptAt,
+        lastAttemptAt: send ? sql`clock_timestamp()` : refund.lastAttemptAt,
         retryCount: sql`${refunds.retryCount} + 1`,
         errorMessage: "PROVIDER_RESULT_REQUIRES_CONFIRMATION",
-        updatedAt: new Date(),
+        updatedAt: sql`date_trunc('milliseconds',clock_timestamp())`,
       })
       .where(eq(refunds.id, refund.id));
     return { send, payload, orderId: refund.orderId };
@@ -180,9 +184,9 @@ export async function processRefund(refundId: string, api: VnpayApi) {
       .set({
         status: RefundStatus.COMPLETED,
         providerRefundRef: response.vnp_TransactionNo!,
-        processedAt: new Date(),
+        processedAt: sql`clock_timestamp()`,
         errorMessage: null,
-        updatedAt: new Date(),
+        updatedAt: sql`date_trunc('milliseconds',clock_timestamp())`,
       })
       .where(eq(refunds.id, refundId));
     const [completed] = await tx
@@ -200,7 +204,10 @@ export async function processRefund(refundId: string, api: VnpayApi) {
     )
       await tx
         .update(orders)
-        .set({ status: OrderStatus.REFUNDED, updatedAt: new Date() })
+        .set({
+          status: OrderStatus.REFUNDED,
+          updatedAt: sql`date_trunc('milliseconds',clock_timestamp())`,
+        })
         .where(eq(orders.id, order.id));
     await tx.insert(auditLog).values({
       actorRole: "SYSTEM",

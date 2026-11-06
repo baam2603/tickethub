@@ -1,5 +1,6 @@
 import {
   Controller,
+  Inject,
   Post,
   Body,
   Headers,
@@ -12,31 +13,40 @@ import {
   type AuthenticatedUser,
 } from "../auth/decorators/current-user.decorator";
 import { RefundsService } from "./refunds.service";
+import {
+  RefundPreviewRequestSchema,
+  RefundExecuteRequestSchema,
+} from "@tickethub/shared";
+import { parseInput } from "../organizer-operations/operations.controller";
 import type {
-  RefundPreviewRequest,
   RefundPreviewResponse,
-  RefundExecuteRequest,
   RefundExecuteResponse,
 } from "@tickethub/shared";
 
 @Controller("api/v1/refund")
 @UseGuards(JwtAuthGuard)
 export class RefundsController {
-  constructor(private readonly refundsService: RefundsService) {}
+  constructor(
+    @Inject(RefundsService) private readonly refundsService: RefundsService,
+  ) {}
 
   @Post("preview")
   async preview(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() body: RefundPreviewRequest,
+    @Body() body: unknown,
   ): Promise<RefundPreviewResponse> {
-    return this.refundsService.previewRefund(user.userId, user.role, body);
+    return this.refundsService.previewRefund(
+      user.userId,
+      user.role,
+      parseInput(RefundPreviewRequestSchema, body),
+    );
   }
 
   @Post("request")
   async request(
     @CurrentUser() user: AuthenticatedUser,
     @Headers("idempotency-key") idempotencyKey: string,
-    @Body() body: RefundExecuteRequest,
+    @Body() body: unknown,
   ): Promise<RefundExecuteResponse> {
     if (!idempotencyKey || idempotencyKey.trim() === "") {
       throw new BadRequestException("Missing Idempotency-Key header");
@@ -44,7 +54,7 @@ export class RefundsController {
     return this.refundsService.executeRefund(
       user.userId,
       user.role,
-      body,
+      parseInput(RefundExecuteRequestSchema, body),
       idempotencyKey.trim(),
     );
   }

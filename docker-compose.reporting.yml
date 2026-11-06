@@ -41,5 +41,24 @@ services:
     # Worker khong mo HTTP server; healthcheck HTTP cua image chi danh cho API.
     healthcheck:
       disable: true
+  payment-worker:
+    image: tickethub-api:local
+    command: ["node", "dist/jobs/payment.worker.js"]
+    profiles: ["payments"]
+    restart: unless-stopped
+    init: true
+    env_file: .env.reporting
+    environment:
+      NODE_ENV: production
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
 volumes:
   report_exports:

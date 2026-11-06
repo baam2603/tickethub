@@ -1,3 +1,4 @@
+import { and, eq, sql } from "drizzle-orm";
 import { db, sqlClient } from "./db";
 import {
   users,
@@ -78,7 +79,10 @@ async function seed() {
     .onConflictDoNothing();
 
   if (!organizerUser) {
-    console.log("Seed data already present. Skipping insertion.");
+    console.log(
+      "Core seed already present. Updating missing venue catalog only.",
+    );
+    await seedCuratedVenues();
     await sqlClient.end();
     return;
   }
@@ -236,10 +240,37 @@ async function seed() {
   }
 
   // 8. Curated Venues & Layouts
-  console.log("Seeding Curated Venues and SVG layouts...");
-  const [myDinh] = await db
-    .insert(venues)
-    .values({
+  await seedCuratedVenues();
+
+  console.log("Database seeded successfully.");
+  await sqlClient.end();
+}
+
+async function seedCuratedVenues() {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(7045545)`);
+    async function ensureVenue(input: typeof venues.$inferInsert) {
+      const existing = await tx.query.venues.findFirst({
+        where: and(eq(venues.name, input.name), eq(venues.city, input.city)),
+      });
+      if (existing) return existing;
+      const [created] = await tx.insert(venues).values(input).returning();
+      return created!;
+    }
+    async function ensureLayouts(inputs: (typeof venueLayouts.$inferInsert)[]) {
+      for (const input of inputs) {
+        if (!input.mapKey) throw new Error("Seed layout requires mapKey");
+        const existing = await tx.query.venueLayouts.findFirst({
+          where: and(
+            eq(venueLayouts.venueId, input.venueId),
+            eq(venueLayouts.mapKey, input.mapKey),
+          ),
+        });
+        if (!existing) await tx.insert(venueLayouts).values(input);
+      }
+    }
+    console.log("Seeding Curated Venues and SVG layouts...");
+    const myDinh = await ensureVenue({
       name: "Sân vận động Quốc gia Mỹ Đình",
       shortName: "SVĐ Mỹ Đình",
       city: "Hà Nội",
@@ -250,13 +281,9 @@ async function seed() {
       thumbnailUrl: "/images/venues/my-dinh.webp",
       description:
         "Sân vận động quốc gia trọng điểm phục vụ đại nhạc hội và thi đấu thể thao quốc tế.",
-    })
-    .onConflictDoNothing()
-    .returning();
+    });
 
-  const [phuTho] = await db
-    .insert(venues)
-    .values({
+    const phuTho = await ensureVenue({
       name: "Nhà thi đấu Thể dục Thể thao Phú Thọ",
       shortName: "NTĐ Phú Thọ",
       city: "TP. Hồ Chí Minh",
@@ -266,13 +293,9 @@ async function seed() {
       totalCapacity: "8,000",
       thumbnailUrl: "/images/venues/phu-tho.webp",
       description: "Nhà thi đấu đa năng hiện đại hàng đầu khu vực phía Nam.",
-    })
-    .onConflictDoNothing()
-    .returning();
+    });
 
-  const [tienSon] = await db
-    .insert(venues)
-    .values({
+    const tienSon = await ensureVenue({
       name: "Cung Thể thao Tiên Sơn",
       shortName: "Cung TT Tiên Sơn",
       city: "Đà Nẵng",
@@ -282,14 +305,10 @@ async function seed() {
       totalCapacity: "6,500",
       thumbnailUrl: "/images/venues/tien-son.webp",
       description: "Cung thể thao Đĩa Bay hiện đại bậc nhất miền Trung.",
-    })
-    .onConflictDoNothing()
-    .returning();
+    });
 
-  if (myDinh) {
-    await db
-      .insert(venueLayouts)
-      .values([
+    if (myDinh) {
+      await ensureLayouts([
         {
           venueId: myDinh.id,
           name: "Sân Khấu Chữ T (Live Concert T-Stage)",
@@ -344,14 +363,11 @@ async function seed() {
           ],
           isDefault: false,
         },
-      ])
-      .onConflictDoNothing();
-  }
+      ]);
+    }
 
-  if (phuTho) {
-    await db
-      .insert(venueLayouts)
-      .values([
+    if (phuTho) {
+      await ensureLayouts([
         {
           venueId: phuTho.id,
           name: "Live Concert Sân Khấu Trung Tâm (360 Arena)",
@@ -376,14 +392,11 @@ async function seed() {
           ],
           isDefault: true,
         },
-      ])
-      .onConflictDoNothing();
-  }
+      ]);
+    }
 
-  if (tienSon) {
-    await db
-      .insert(venueLayouts)
-      .values([
+    if (tienSon) {
+      await ensureLayouts([
         {
           venueId: tienSon.id,
           name: "Đêm Nhạc Hội Khán Phòng Arena",
@@ -408,12 +421,9 @@ async function seed() {
           ],
           isDefault: true,
         },
-      ])
-      .onConflictDoNothing();
-  }
-
-  console.log("Database seeded successfully.");
-  await sqlClient.end();
+      ]);
+    }
+  });
 }
 
 seed().catch((err) => {

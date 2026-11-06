@@ -114,7 +114,6 @@ describe("W05 BE2: staff, manual checkin, materialized reports va export", () =>
         endTime: new Date(Date.now() + 90000000),
         gateOpeningTime: new Date(),
         status: "PUBLISHED",
-        isWaitingRoomEnabled: false,
       })
       .returning();
     eventIds.push(e!.id);

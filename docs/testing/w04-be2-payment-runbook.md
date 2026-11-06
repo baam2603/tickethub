@@ -7,7 +7,7 @@
 - IPN muộn: khôi phục nguyên tử toàn bộ vé nếu còn trống; nếu đã mất kho thì lưu yêu cầu hoàn 100% và outbox trong cùng transaction.
 - Worker transactional outbox gửi xác nhận vé, gọi Refund và đối soát khi chưa rõ kết quả; gọi HTTP sau khi đã commit transaction.
 
-API hủy vé và chính sách hoàn tiền tự nguyện thuộc phần BE1, vẫn là PLANNED trong API contract. BE1 cần thu hồi vé và trả kho trong transaction trước khi tạo refund PENDING và outbox REFUND_REQUESTED. Worker từ chối refund tự nguyện nếu vé liên quan chưa CANCELLED. API này không tạo module voucher mới: discount và voucher phải được quy trình server phê duyệt trước khi gọi thanh toán.
+API hủy vé và chính sách hoàn tiền tự nguyện của BE1 đã được tích hợp qua POST /api/v1/refund/preview và /request. API thu hồi vé và trả kho trong transaction trước khi tạo refund PENDING và outbox REFUND_REQUESTED. Worker từ chối refund tự nguyện nếu vé liên quan chưa CANCELLED. API này không tạo module voucher mới: discount và voucher phải được quy trình server phê duyệt trước khi gọi thanh toán.
 
 ## Cài đặt và vận hành
 
@@ -70,3 +70,7 @@ pnpm build
 Bộ w04-payment.integration.test.ts dùng HTTP API thật, PostgreSQL và Redis thật; chỉ mô phỏng giao thức VNPay/Resend bằng máy chủ HTTP cục bộ. Nó không chứng minh merchant sandbox thật đã chấp nhận giao dịch. Phải chạy thêm một giao dịch sandbox, IPN thật, QueryDR và refund thật trước khi nghiệm thu tích hợp ngoài.
 
 Không sao chép dist từ file ZIP vào repository để thay thế mã nguồn. Migration 0003 lưu metadata truy vấn/hoàn tiền và mở rộng trạng thái đơn, không thay đổi dữ liệu thanh toán cũ; các bản ghi cũ thiếu metadata cần đối soát thủ công.
+
+## Bản tích hợp unstable
+
+Migration chung là 0005_integrate-w03-w05.sql, đặt sau 0000-0004 của unstable. Worker nhận cả payload refundId đơn lẻ lẫn refundIds của API UC06; đơn đã thu hồi toàn bộ vé có thể là REFUNDED trước khi provider hoàn tất, nên phải kiểm tra refunds.status để biết tiền đã hoàn. Đọc [hướng dẫn tích hợp](integration-w03-w05.md).

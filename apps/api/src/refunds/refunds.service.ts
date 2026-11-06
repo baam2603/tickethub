@@ -25,6 +25,7 @@ import {
 import { db } from "../database/db";
 import {
   orders,
+  orderItems,
   tickets,
   seats,
   ticketTypes,
@@ -131,13 +132,24 @@ export class RefundsService {
       0,
     );
 
+    const purchased = await db
+      .select()
+      .from(orderItems)
+      .where(eq(orderItems.orderId, order.id));
     const ticketsToRefund: TicketToRefund[] = requestedTickets.map((t) => ({
       ticketId: t.id,
       ticketCode: t.ticketCode,
       seatLabel: t.seat
         ? `Hàng ${t.seat.rowLabel} - Ghế ${t.seat.seatNumber}`
         : t.ticketType?.name || "GA",
-      unitPrice: Number(t.ticketType?.price || 0),
+      unitPrice: Number(
+        purchased.find(
+          (item) =>
+            item.ticketTypeId === t.ticketTypeId && item.seatId === t.seatId,
+        )?.unitPrice ??
+          t.ticketType?.price ??
+          0,
+      ),
     }));
 
     const breakdown = calculateTicketRefundBreakdown({
@@ -264,13 +276,25 @@ export class RefundsService {
         .from(ticketTypes)
         .where(inArray(ticketTypes.id, ttIds));
       const ttMap = new Map(ttRows.map((tt) => [tt.id, tt]));
+      const purchased = await tx
+        .select()
+        .from(orderItems)
+        .where(eq(orderItems.orderId, order.id));
 
       const ticketsToRefund: TicketToRefund[] = requestedTickets.map((t) => {
         const tt = ttMap.get(t.ticketTypeId);
         return {
           ticketId: t.id,
           ticketCode: t.ticketCode,
-          unitPrice: Number(tt?.price || 0),
+          unitPrice: Number(
+            purchased.find(
+              (item) =>
+                item.ticketTypeId === t.ticketTypeId &&
+                item.seatId === t.seatId,
+            )?.unitPrice ??
+              tt?.price ??
+              0,
+          ),
         };
       });
 

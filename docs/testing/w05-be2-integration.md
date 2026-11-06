@@ -112,8 +112,8 @@ Nhân viên/BTC không đủ trạng thái hoặc role vẫn bị 403.
 
 ## Triển khai API và worker
 
-Chạy migration 0004 và 0005 sau migration tuần 5 hiện có. Không sửa migration đã áp dụng ở môi trường khác.
-Nếu merge nhánh tuần 4 có migration cùng chỉ số 0003, phải xử lý chuỗi migration khi tích hợp, không chạy hai lịch sử cạnh tranh.
+Trên unstable tích hợp, chạy migration chung 0005_integrate-w03-w05.sql sau 0000-0004 gốc của unstable. Không chạy lại các file migration đánh số của nhánh W04/W05 cũ.
+Chuỗi migration đã được hợp nhất; hỗ trợ nâng cấp từ schema W04/W05 cũ mà giữ bảng nghiệp vụ. Chi tiết và bằng chứng trong integration-w03-w05.md.
 API và worker bắt buộc dùng cùng DATABASE_URL và cùng thư mục REPORT_EXPORT_DIR tuyệt đối trên shared volume.
 Production thiếu đường dẫn tuyệt đối sẽ không tạo/tải file. Không dùng thư mục public.
 
@@ -160,3 +160,5 @@ Nhận job, retry, lease và hạn file dùng giờ PostgreSQL thay vì so sánh
 Bộ W05 hiện có 19 ca, gồm đối chứng đồng hồ chậm/nhanh và kiểm tra không bỏ qua backoff.
 
 Khi chạy suite tự động, dừng report worker riêng đang trỏ vào cùng database test để tránh hai tiến trình tranh job. Suite tự khởi động API và gọi worker, không cần bật dev backend hay worker bên ngoài. Bản sửa đồng hồ không yêu cầu migration mới.
+
+Bản unstable tích hợp có 21 bảng: 18 bảng nền, bao gồm venues/venue_layouts, và ba bảng W05. Không còn Waiting Room. Có thể bật profile payments của compose sau khi cấu hình merchant để chạy payment-worker cùng API/report-worker.

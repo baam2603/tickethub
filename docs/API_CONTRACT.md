@@ -1436,3 +1436,13 @@ HTTP tối đa 10000 dòng, vượt trả 422 REPORT_TOO_LARGE và hướng sang
 vượt trả job FAILED REPORT_TOO_LARGE, không xuất thiếu dòng. Giới hạn mới thay thế giới hạn export 10000 dòng phía trên.
 Danh sách staff, cổng, phân công, checkins và exports giữ data dạng mảng, thêm meta page/limit/hasMore.
 Outbox REPORT_EXPORT_COMPLETED được ghi nguyên tử với hoàn tất job; gửi email cần cấu hình riêng, link vào FE có xác thực.
+
+### Tích hợp W03/W04/W05 trên unstable
+
+Search keyword dưới hai ký tự bỏ full-text nhưng giữ các bộ lọc, keyword hợp lệ ưu tiên ts_rank và phân trang theo cùng thứ tự.
+Không phục hồi UC03 hoặc admission token. Giữ các API venues, payout và SSE hiện có trên unstable.
+POST /api/v1/refund/preview và /request kiểm tra request bằng shared schema trước khi gọi service.
+Giá hoàn tiền ưu tiên snapshot order_items.unit_price thay vì giá hạng vé hiện tại.
+Worker xử lý REFUND_REQUESTED với refundId hoặc refundIds; kiểm tra vé đã CANCELLED và cho phép đơn PAID/REFUNDED,
+không coi order.status=REFUNDED là bằng chứng provider đã hoàn tất: chỉ refunds.status=COMPLETED xác nhận tiền hoàn.
+Sau IPN, SSE phát trạng thái ghế đọc từ DB, không phát AVAILABLE cho ghế đã thuộc đơn khác khi IPN cũ phải hoàn tiền.
