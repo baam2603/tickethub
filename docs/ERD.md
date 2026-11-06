@@ -359,7 +359,7 @@ Lưu hồ sơ pháp lý của ban tổ chức để quản trị viên kiểm du
 | created_at           | TIMESTAMPTZ  | NOT NULL DEFAULT now()                                                                                     | Thời điểm tạo                             |
 | updated_at           | TIMESTAMPTZ  | NOT NULL DEFAULT now()                                                                                     | Thời điểm cập nhật cuối                   |
 
-### venues [PLANNED]
+### venues
 
 Lưu thông tin các địa điểm tổ chức sự kiện tiêu chuẩn (Curated Venues) đã được quản trị viên kiểm duyệt tại 3 thành phố lớn: TP. Hồ Chí Minh, Hà Nội và Đà Nẵng.
 
@@ -388,7 +388,7 @@ CREATE INDEX idx_venues_fts ON venues USING gin (
 );
 ```
 
-### venue_layouts [PLANNED]
+### venue_layouts
 
 Lưu trữ các cấu hình sân khấu và sơ đồ khán đài kiến trúc chuẩn dạng SVG (Live Concert T-stage, Mega Concert, Sân bóng đá, Sàn thi đấu thể thao, Khán phòng nhà hát) liên kết với từng địa điểm tổ chức.
 

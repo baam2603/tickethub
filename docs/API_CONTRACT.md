@@ -322,9 +322,9 @@ Cập nhật trạng thái ghế theo thời gian thực qua Redis Pub/Sub.
 }
 ```
 
-### [PLANNED] Địa điểm chuẩn và Sơ đồ SVG (`/venues`)
+### Địa điểm chuẩn và Sơ đồ SVG (`/venues`)
 
-#### [PLANNED] `GET /api/v1/venues`
+#### `GET /api/v1/venues`
 
 Lấy danh mục các địa điểm tổ chức chuẩn (Curated Venues) đã được quản trị viên kiểm duyệt, hỗ trợ lọc theo 3 thành phố lớn, thể loại và tìm kiếm từ khóa.
 
@@ -373,13 +373,13 @@ Lấy danh mục các địa điểm tổ chức chuẩn (Curated Venues) đã �
 }
 ```
 
-#### [PLANNED] `GET /api/v1/venues/:id`
+#### `GET /api/v1/venues/:id`
 
 Lấy chi tiết một địa điểm chuẩn kèm tất cả cấu hình sơ đồ khán đài SVG và phân khu mặc định.
 
 - Response 200: Chi tiết địa điểm và danh sách các layout có sẵn (`layouts` kèm `defaultZones`).
 
-#### [PLANNED] `GET /api/v1/venues/:id/layouts`
+#### `GET /api/v1/venues/:id/layouts`
 
 Lấy danh sách các mẫu sơ đồ khán đài của địa điểm kèm danh sách `defaultZones` tương thích với `data-zone` trong tệp SVG.
 
@@ -1078,7 +1078,7 @@ Xác nhận phê duyệt lệnh chi trả tiền bán vé cho ban tổ chức.
 
 - Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT`.
 
-#### [PLANNED] `POST /api/v1/admin/venues`
+#### `POST /api/v1/admin/venues`
 
 Quản trị viên tạo mới hoặc nhập một địa điểm tổ chức chuẩn vào hệ thống.
 
@@ -1112,7 +1112,7 @@ Quản trị viên tạo mới hoặc nhập một địa điểm tổ chức ch
 }
 ```
 
-#### [PLANNED] `POST /api/v1/admin/venues/:id/layouts`
+#### `POST /api/v1/admin/venues/:id/layouts`
 
 Quản trị viên liên kết mẫu sơ đồ SVG đã chuẩn hóa (hoặc tải lên SVG mới) cho địa điểm tổ chức.
 
@@ -1156,7 +1156,7 @@ Quản trị viên liên kết mẫu sơ đồ SVG đã chuẩn hóa (hoặc t�
 }
 ```
 
-#### [PLANNED] `PUT /api/v1/admin/venues/:id`
+#### `PUT /api/v1/admin/venues/:id`
 
 Quản trị viên cập nhật thông tin địa điểm hoặc tạm ngưng khả dụng.
 

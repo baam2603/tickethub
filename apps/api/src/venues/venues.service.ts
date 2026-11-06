@@ -84,10 +84,11 @@ export class VenuesService {
       .offset(offset);
 
     // Đếm tổng số bản ghi
-    const [{ totalCount }] = await db
+    const countRows = await db
       .select({ totalCount: count() })
       .from(venues)
       .where(whereClause);
+    const totalCount = countRows[0]?.totalCount ?? 0;
 
     // Lấy số lượng layout cho từng địa điểm
     const venueIds = items.map((v) => v.id);
