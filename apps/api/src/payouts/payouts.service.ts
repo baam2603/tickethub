@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from "@nestjs/common";
 import { and, eq, inArray, sql, desc, count } from "drizzle-orm";
 import { db } from "../database/db";
@@ -344,14 +345,29 @@ export class PayoutsService {
    * Danh sach quyet toan danh cho Ban to chuc
    */
   async getOrganizerPayouts(
-    organizerProfileId: string,
+    userId: string,
     query: OrganizerPayoutQueryDto,
   ) {
+    const profile = await db.query.organizerProfiles.findFirst({
+      where: eq(organizerProfiles.userId, userId),
+    });
+
+    if (!profile) {
+      throw new ForbiddenException({
+        success: false,
+        error: {
+          code: "ORGANIZER_PROFILE_REQUIRED",
+          message: "Tài khoản chưa có hồ sơ ban tổ chức",
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const offset = (page - 1) * limit;
 
-    const whereClause = eq(payouts.organizerId, organizerProfileId);
+    const whereClause = eq(payouts.organizerId, profile.id);
 
     const [totalRow] = await db
       .select({ count: count() })
