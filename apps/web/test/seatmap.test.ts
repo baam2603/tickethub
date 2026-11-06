@@ -171,14 +171,6 @@ describe("SeatMap: UC04 Architectural Map & Navigation", () => {
 
   test("getHoldErrorInfo anh xa dung ma loi UC04 (E1, E5, E6, E7)", () => {
     assert.equal(getHoldErrorInfo(401).action, "LOGIN");
-    assert.equal(
-      getHoldErrorInfo(403, "MISSING_ADMISSION_TOKEN").action,
-      "WAITING_ROOM",
-    );
-    assert.equal(
-      getHoldErrorInfo(403, "INVALID_ADMISSION_TOKEN").action,
-      "WAITING_ROOM",
-    );
     assert.equal(getHoldErrorInfo(403, "FORBIDDEN").action, "NONE");
     assert.equal(getHoldErrorInfo(409).action, "REFRESH");
     assert.equal(

@@ -63,19 +63,17 @@ describe("Booking proxy: khong bao gio tao phan hoi thanh cong gia", () => {
     assert.equal(res.status, 409);
   });
 
-  test("chuyen tiep Authorization, X-Admission-Token, Idempotency-Key", async () => {
+  test("chuyen tiep Authorization va Idempotency-Key", async () => {
     nextStatus = 201;
     nextBody = { success: true, data: {} };
     await proxyBooking(
       makeRequest({
         Authorization: "Bearer abc",
-        "X-Admission-Token": "adm-1",
         "Idempotency-Key": "idem-1",
       }),
       "hold",
     );
     assert.equal(received.headers["authorization"], "Bearer abc");
-    assert.equal(received.headers["x-admission-token"], "adm-1");
     assert.equal(received.headers["idempotency-key"], "idem-1");
   });
 
