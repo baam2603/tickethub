@@ -10,3 +10,5 @@ export * from "./schemas/ticket-checkin.schema";
 export * from "./schemas/admin-killswitch.schema";
 export * from "./schemas/buyer-order.schema";
 export * from "./schemas/venue.schema";
+export * from "./schemas/payout.schema";
+
