@@ -409,11 +409,7 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
     app = await NestFactory.create<NestFastifyApplication>(
       {
         module: PaymentTestModule,
-        controllers: [
-          PaymentController,
-          VnpayIpnController,
-          RefundsController,
-        ],
+        controllers: [PaymentController, VnpayIpnController, RefundsController],
         providers: [
           { provide: JwtService, useValue: jwt },
           { provide: SeatStreamService, useValue: stream },

@@ -7,7 +7,7 @@
 - IPN muộn: khôi phục nguyên tử toàn bộ vé nếu còn trống; nếu đã mất kho thì lưu yêu cầu hoàn 100% và outbox trong cùng transaction.
 - Worker transactional outbox gửi xác nhận vé, gọi Refund và đối soát khi chưa rõ kết quả; gọi HTTP sau khi đã commit transaction.
 
-API hủy vé và chính sách hoàn tiền tự nguyện thuộc phần BE1, vẫn là PLANNED trong API contract. BE1 cần thu hồi vé và trả kho trong transaction trước khi tạo refund PENDING và outbox REFUND_REQUESTED. Worker từ chối refund tự nguyện nếu vé liên quan chưa CANCELLED. API này không tạo module voucher mới: discount và voucher phải được quy trình server phê duyệt trước khi gọi thanh toán.
+API hủy vé và chính sách hoàn tiền tự nguyện của BE1 đã có trên unstable và được nối với worker này. BE1 cần thu hồi vé và trả kho trong transaction trước khi tạo refund PENDING và outbox REFUND_REQUESTED. Worker từ chối refund tự nguyện nếu vé liên quan chưa CANCELLED. API này không tạo module voucher mới: discount và voucher phải được quy trình server phê duyệt trước khi gọi thanh toán.
 
 ## Cài đặt và vận hành
 
@@ -70,3 +70,15 @@ pnpm build
 Bộ w04-payment.integration.test.ts dùng HTTP API thật, PostgreSQL và Redis thật; chỉ mô phỏng giao thức VNPay/Resend bằng máy chủ HTTP cục bộ. Nó không chứng minh merchant sandbox thật đã chấp nhận giao dịch. Phải chạy thêm một giao dịch sandbox, IPN thật, QueryDR và refund thật trước khi nghiệm thu tích hợp ngoài.
 
 Không sao chép dist từ file ZIP vào repository để thay thế mã nguồn. Migration 0003 lưu metadata truy vấn/hoàn tiền và mở rộng trạng thái đơn, không thay đổi dữ liệu thanh toán cũ; các bản ghi cũ thiếu metadata cần đối soát thủ công.
+
+## PR W04 đã tách riêng
+
+Nộp sau PR W03; nền nhánh gồm W03 và unstable bản gốc 1964f85. Không có ReportingModule hoặc ba bảng W05.
+Migration 0005_w04-provider-integration.sql chỉ mở rộng schema thanh toán/refund; tổng vẫn 18 bảng nền.
+Migration giữ lại các MV/index báo cáo legacy nếu có khi mở rộng orders.status. Với MV tùy biến owner/grant hoặc view phụ thuộc,
+transaction sẽ từ chối/rollback để không làm mất cấu hình. Không reset metadata hoặc xóa bảng nghiệp vụ.
+
+Đã mang các sửa tích hợp: payload refundId/refundIds, đơn đã hủy hết vé ở trạng thái REFUNDED,
+giá mua snapshot, validation request, clock/fencing worker, SSE không báo còn ghế khi IPN cũ bị hoàn tiền,
+seed venues/layouts chạy lặp. Test W04 chỉ kiểm tra thanh toán/hủy/refund, không import module W05.
+Sau khi W04 được merge, cập nhật W05 theo đúng lịch sử này; W05 bổ sung migration 0006 riêng.
