@@ -227,7 +227,6 @@ describe("Auto Seat Allocation (UC04) Integration Tests", () => {
   });
 
   after(async () => {
-
     // Don dep database
     if (testEventId) {
       await db

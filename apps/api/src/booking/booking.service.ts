@@ -107,10 +107,7 @@ export class BookingService {
     private readonly seatStreamService?: SeatStreamService,
   ) {}
 
-  async holdSeats(
-    userId: string,
-    dto: HoldSeatsRequest,
-  ) {
+  async holdSeats(userId: string, dto: HoldSeatsRequest) {
     const event = await db.query.events.findFirst({
       where: eq(events.id, dto.eventId),
     });
