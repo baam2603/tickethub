@@ -24,6 +24,8 @@ export const transactions = pgTable("transactions", {
   amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
   responseCode: varchar("response_code", { length: 10 }),
   bankCode: varchar("bank_code", { length: 20 }),
+  vnpCreateDate: varchar("vnp_create_date", { length: 14 }),
+  paymentUrl: varchar("payment_url", { length: 4000 }),
   payDate: timestamp("pay_date", { withTimezone: true }),
   status: varchar("status", { length: 20 })
     .notNull()

@@ -516,8 +516,10 @@ Xem chi tiết chuyên sâu của một đơn hàng.
 
 Khởi tạo giao dịch thanh toán VNPay và nhận URL chuyển hướng đến cổng thanh toán VNPay.
 
-- Header: `Authorization: Bearer <accessToken>`
-- Response 200:
+- Header: `Authorization: Bearer <accessToken>`, tùy chọn `Idempotency-Key: <UUID>`.
+- Số tiền chỉ lấy từ đơn và chi tiết đơn trong PostgreSQL, kiểm tra tổng tiền trừ giảm giá đã được server lưu. API này không tiếp nhận giá hoặc tự phê duyệt voucher từ client.
+- Chỉ chủ đơn PENDING còn trên 45 giây giữ chỗ được tạo URL. Gọi lại tái sử dụng transaction và URL đã lưu; hạn URL bằng hạn giữ chỗ.
+- Response 201:
   ```json
   {
     "success": true,
@@ -527,12 +529,27 @@ Khởi tạo giao dịch thanh toán VNPay và nhận URL chuyển hướng đ�
   }
   ```
 
+#### `POST /api/v1/payments/orders/:orderId/vnpay/query`
+
+Đối soát QueryDR khi client chưa nhận được kết quả IPN.
+
+- Header: `Authorization: Bearer <accessToken>`. Chỉ chủ sở hữu đơn được gọi.
+- Không nhận số tiền, merchant, URL hoặc mã giao dịch do client cung cấp.
+- Response 201: `{ "success": true, "data": { "decision": "APPLY_SUCCESS", "responseCode": "00" } }`.
+- `ALREADY_PROCESSED`: giao dịch đã được xử lý; `MANUAL_REVIEW`: kết quả chưa xác định; `AMOUNT_MISMATCH`: không khớp tiền.
+- HTTP 400 nếu giao dịch cũ thiếu ngày tạo VNPay; HTTP 404 nếu không có giao dịch thuộc người gọi; HTTP 503 nếu VNPay lỗi, timeout hoặc phản hồi không xác minh được.
+- Chỉ phản hồi QueryDR loại thanh toán `01` được đưa vào xử lý đơn. Kết quả hoàn tiền `02`/`03` không được dùng để cấp vé.
+
 #### `GET /api/v1/payments/vnpay/ipn`
 
 Endpoint nhận webhook IPN (Instant Payment Notification) từ cổng thanh toán VNPay để cập nhật trạng thái đơn hàng thành công.
 
 - Tham số: Toàn bộ query params từ VNPay (`vnp_TxnRef`, `vnp_Amount`, `vnp_ResponseCode`, `vnp_SecureHash`, ...)
-- Response 200: `{"RspCode": "00", "Message": "Confirm Success"}`
+- Cần bật `ENABLE_VNPAY_IPN_PROCESSING=true`; mặc định endpoint tắt.
+- Xác minh HMAC-SHA512, merchant, số tiền trước khi cập nhật; khóa order rồi transaction trong cùng transaction DB.
+- IPN thành công đến muộn với đủ metadata: khôi phục toàn bộ vé nếu còn trống; nếu không đủ kho thì rollback phần khôi phục và chuyển đơn sang `PAYMENT_EXPIRED_REFUND_PENDING`, tạo một refund cùng sự kiện outbox `REFUND_REQUESTED`. Không gọi API hoàn tiền trong transaction DB.
+- Giao dịch cũ thiếu ngày tạo, mã giao dịch VNPay hoặc ngày thanh toán hợp lệ được giữ ở `MANUAL_REVIEW` để tránh tự động xử lý dựa trên bằng chứng thiếu.
+- Response 200: `{"RspCode": "00", "Message": "Confirm Success"}`; callback lặp trả `02`, sai chữ ký `97`, sai tiền `04`, không có đơn `01`, cần đối soát `99`.
 
 #### `GET /api/v1/internal/vnpay/ipn-preview`
 
