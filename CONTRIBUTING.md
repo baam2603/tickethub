@@ -92,7 +92,7 @@ Hệ thống quản lý mã nguồn với hai nhánh chính và các nhánh làm
   - `refactor`: Tái cấu trúc mã nguồn.
   - `test`: Thêm hoặc sửa đổi bài kiểm thử.
   - `chore`: Cấu hình phụ thuộc, công cụ phát triển hoặc tác vụ bảo trì.
-- **Scope thường dùng:** `api`, `web`, `shared`, `auth`, `booking`, `events`, `waiting-room`, `config`.
+- **Scope thường dùng:** `api`, `web`, `shared`, `auth`, `booking`, `events`, `config`.
 - **Quy định quan trọng:** Không chèn biểu tượng cảm xúc hoặc ký tự tượng hình vào tiêu đề và nội dung commit.
 
 ## 7. Tiêu chuẩn kiểm thử (Testing Guidelines)

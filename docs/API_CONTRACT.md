@@ -57,7 +57,6 @@ Thất bại (`HTTP 4xx` hoặc `5xx`):
 | `NOT_FOUND`              | 404         | Tài nguyên không tồn tại                                 |
 | `SEAT_ALREADY_HELD`      | 409         | Ghế đã có người giữ hoặc đã bán                          |
 | `CONFLICT_VERSION`       | 409         | Xung đột phiên bản dữ liệu khi cập nhật đồng thời        |
-| `WAITING_ROOM_REQUIRED`  | 428         | Sự kiện đang bật hàng chờ, thiếu admission token         |
 | `TOO_MANY_REQUESTS`      | 429         | Gửi yêu cầu vượt quá giới hạn tần suất cho phép          |
 | `INTERNAL_SERVER_ERROR`  | 500         | Lỗi xử lý nội bộ phía máy chủ                            |
 
@@ -385,46 +384,6 @@ Lấy danh sách các mẫu sơ đồ khán đài của địa điểm kèm danh
 
 - Response 200: Danh sách sơ đồ khán đài kiến trúc kèm ước lượng sức chứa và cấu hình phân khu.
 
-### Hàng chờ ảo (`/waiting-room`)
-
-#### `POST /api/v1/waiting-room/:eventId/join`
-
-Gia nhập hàng chờ trước khi vào màn hình giữ chỗ và mua vé.
-
-- Header: `Authorization: Bearer <accessToken>`
-- Response 200 (khi số người mua vé đồng thời còn dưới ngưỡng `MAX_ACTIVE`):
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "ADMITTED",
-    "admissionToken": "jwt_token_valid_10_minutes"
-  }
-}
-```
-
-- Response 202 (khi phải xếp hàng):
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "QUEUED",
-    "queuePosition": 142,
-    "estimatedWaitSeconds": 90,
-    "queueId": "q_user_uuid_event_uuid"
-  }
-}
-```
-
-#### `POST /api/v1/waiting-room/:eventId/heartbeat`
-
-Gửi tín hiệu duy trì vị trí hàng chờ mỗi 15 giây.
-
-- Request body: `{ "queueId": "q_user_uuid_event_uuid" }`
-- Response 200: `{ "success": true, "data": { "queuePosition": 120, "estimatedWaitSeconds": 75 } }`
-
 ### Đặt và giữ chỗ vé (`/booking`)
 
 #### `POST /api/v1/booking/hold`
@@ -435,7 +394,6 @@ Giữ chỗ vé trong thời hạn 5 phút với cơ chế tự động phân b�
 - Header:
   - `Authorization: Bearer <accessToken>`
   - `Idempotency-Key: <UUID>`
-  - `X-Admission-Token: <token>` (khi sự kiện bật hàng chờ)
 - Cơ chế phân bổ: Người mua chọn hạng vé (`ticketTypeId`) và số lượng vé (`quantity`). Hệ thống tự động tìm và cấp các ghế còn trống liền kề trong cùng một hàng. Nếu hàng bị phân mảnh, hệ thống tự động quét và ưu tiên hàng có đủ ghế liền kề tiếp theo trong cùng hạng vé.
 - Request body:
 

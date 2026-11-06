@@ -26,7 +26,7 @@ graph TD
 
     subgraph DataLayer["Tầng Dữ liệu"]
         Postgres[(PostgreSQL 16/17\nLưu trữ giao dịch, khóa hàng)]
-        Redis[(Redis\nCache, Hàng chờ, Pub/Sub, BullMQ)]
+        Redis[(Redis\nCache, Rate Limiter, Pub/Sub, BullMQ)]
         Storage[(Cloudflare R2 / AWS S3\nLưu trữ ảnh và tệp)]
     end
 
@@ -66,25 +66,25 @@ graph TD
 Kho mã nguồn sử dụng pnpm workspaces để quản lý các gói:
 
 - `apps/web`: Ứng dụng giao diện người dùng xây dựng bằng Next.js App Router, bao gồm trang công khai, trang mua vé, bảng điều khiển ban tổ chức, bảng điều khiển quản trị viên và ứng dụng PWA soát vé.
-- `apps/api`: Dịch vụ backend xây dựng bằng NestJS trên nền tảng Fastify. Các module nghiệp vụ được tách biệt (auth, events, seats, booking, waiting-room, payment, ticket, checkin, refund, reporting, admin, notification).
+- `apps/api`: Dịch vụ backend xây dựng bằng NestJS trên nền tảng Fastify. Các module nghiệp vụ được tách biệt (auth, events, seats, booking, payment, ticket, checkin, refund, reporting, admin, notification).
 - `packages/shared`: Thư viện dùng chung chứa định nghĩa kiểu dữ liệu TypeScript, schema xác thực Zod và hằng số hệ thống.
 
 ## Ranh giới vai trò và Ma trận phân quyền
 
 Hệ thống phân tách rõ trách nhiệm giữa các tầng client và vai trò người dùng nhằm ngăn ngừa xung đột lợi ích và bảo vệ tính minh bạch của thị trường vé:
 
-| Vai trò        | Client tương tác     | Chức năng chính                                                                                                | Giới hạn nghiệp vụ (Restrictions)                                                   |
-| :------------- | :------------------- | :------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------- |
-| **BUYER**      | `BuyerBrowser`       | Mua vé, tham gia hàng chờ ảo, giữ chỗ ghế (`/booking/hold`), thanh toán qua VNPay, xem vé QR tại `/my-tickets` | Bị chặn truy cập các route `/admin/*` và `/organizer/*`                             |
-| **ORGANIZER**  | `OrganizerDashboard` | Tạo sự kiện, cấu hình hạng vé, sơ đồ ghế, nộp hồ sơ KYC, xem báo cáo doanh thu                                 | **Không thể mua vé**, không có mục "Vé của tôi", bị chặn gọi API giữ chỗ và tạo đơn |
-| **ADMIN**      | `OrganizerDashboard` | Phê duyệt sự kiện, duyệt hồ sơ ban tổ chức, đối soát tài chính, kiểm tra nhật ký kiểm toán                     | **Không thể mua vé**, không có mục "Vé của tôi", bị chặn gọi API giữ chỗ và tạo đơn |
-| **GATE_STAFF** | `GateStaffPWA`       | Quét mã QR và xác thực vé vào cổng                                                                             | Không thể mua vé, không can thiệp cấu hình sự kiện                                  |
+| Vai trò        | Client tương tác     | Chức năng chính                                                                            | Giới hạn nghiệp vụ (Restrictions)                                                   |
+| :------------- | :------------------- | :----------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------- |
+| **BUYER**      | `BuyerBrowser`       | Mua vé, giữ chỗ ghế (`/booking/hold`), thanh toán qua VNPay, xem vé QR tại `/my-tickets`   | Bị chặn truy cập các route `/admin/*` và `/organizer/*`                             |
+| **ORGANIZER**  | `OrganizerDashboard` | Tạo sự kiện, cấu hình hạng vé, sơ đồ ghế, nộp hồ sơ KYC, xem báo cáo doanh thu             | **Không thể mua vé**, không có mục "Vé của tôi", bị chặn gọi API giữ chỗ và tạo đơn |
+| **ADMIN**      | `OrganizerDashboard` | Phê duyệt sự kiện, duyệt hồ sơ ban tổ chức, đối soát tài chính, kiểm tra nhật ký kiểm toán | **Không thể mua vé**, không có mục "Vé của tôi", bị chặn gọi API giữ chỗ và tạo đơn |
+| **GATE_STAFF** | `GateStaffPWA`       | Quét mã QR và xác thực vé vào cổng                                                         | Không thể mua vé, không can thiệp cấu hình sự kiện                                  |
 
 ## Các luồng xử lý chính
 
-### Giữ chỗ và điều tiết hàng chờ
+### Giữ chỗ trực tiếp
 
-Khi sự kiện mở bán lượng vé lớn, hàng chờ ảo được kích hoạt để giới hạn số lượng phiên giữ chỗ đồng thời không vượt quá ngưỡng `MAX_ACTIVE`. Nền tảng áp dụng cơ chế tự động phân bổ ghế liền kề (Auto Seat Allocation) theo hạng vé và số lượng, không yêu cầu người dùng chọn từng vị trí ghế thủ công nhằm tối ưu tốc độ mua vé và ngăn ngừa phân mảnh ghế ngồi.
+Luồng mua vé là luồng trực tiếp: xem sự kiện, chọn hạng vé và số lượng, giữ chỗ rồi chuyển sang thanh toán. Khả năng chịu tải khi mua đồng thời được đảm bảo bằng Redis Sliding-Window Rate Limiter kết hợp khóa dòng PostgreSQL (`FOR UPDATE SKIP LOCKED`). Nền tảng áp dụng cơ chế tự động phân bổ ghế liền kề (Auto Seat Allocation) theo hạng vé và số lượng, không yêu cầu người dùng chọn từng vị trí ghế thủ công nhằm tối ưu tốc độ mua vé và ngăn ngừa phân mảnh ghế ngồi.
 
 ```mermaid
 sequenceDiagram
@@ -95,19 +95,6 @@ sequenceDiagram
     participant API as API Server
     participant DB as PostgreSQL
     participant Worker as BullMQ Worker
-
-    alt Sự kiện bật Hàng chờ ảo
-        Buyer->>Web: Nhấn Mua vé
-        Web->>API: POST /waiting-room/:eventId/join
-        API->>Redis: ZADD event_queue (score = timestamp)
-        API-->>Web: Trả vị trí trong hàng và thời gian chờ dự kiến
-        loop Heartbeat 15 giây/lần
-            Web->>API: POST /waiting-room/:eventId/heartbeat
-            API->>Redis: Cập nhật thời điểm kết nối
-        end
-        Note over API,Redis: Job quét cấp admission token cho đầu hàng khi có slot trống
-        API->>Web: SSE báo đến lượt kèm Admission Token (hiệu lực 10 phút)
-    end
 
     Buyer->>Web: Chọn hạng vé và số lượng vé
     Web->>API: POST /booking/hold (kèm Idempotency-Key và items ticketTypeId + quantity)
@@ -258,7 +245,7 @@ sequenceDiagram
 ### 3. Trải nghiệm chọn chỗ trực quan cho Người mua vé
 
 - Sơ đồ SVG vector được hiển thị sắc nét trên mọi thiết bị và độ phân giải, hỗ trợ thao tác cảm ứng trên thiết bị di động và chuột trên máy tính bàn.
-- Trạng thái từng phân khu (còn vé, sắp hết vé, hết vé) được cập nhật đồng bộ với hệ thống hàng chờ và giữ chỗ thông qua Server-Sent Events (SSE).
+- Trạng thái từng phân khu (còn vé, sắp hết vé, hết vé) được cập nhật đồng bộ với hệ thống giữ chỗ thông qua Server-Sent Events (SSE).
 
 ## Các biện pháp an toàn và giới hạn
 
