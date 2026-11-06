@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
   ConflictException,
   BadRequestException,
@@ -106,8 +107,9 @@ export class BookingService {
     @Inject(EventReadCacheService)
     private readonly eventReadCacheService: EventReadCacheService,
 
+    @Optional()
     @Inject(SeatStreamService)
-    private readonly seatStreamService: SeatStreamService,
+    private readonly seatStreamService?: SeatStreamService,
   ) {}
 
   async holdSeats(
@@ -642,7 +644,7 @@ export class BookingService {
     await this.eventReadCacheService.invalidate(dto.eventId);
 
     if (result.heldSeats && result.heldSeats.length > 0) {
-      await this.seatStreamService.publishSeatStatusChanged(dto.eventId, {
+      await this.seatStreamService?.publishSeatStatusChanged(dto.eventId, {
         seatIds: result.heldSeats,
         status: "HELD",
         expiresAt: result.holdExpiresAt,
@@ -757,7 +759,7 @@ export class BookingService {
         .map((item) => item.seatId)
         .filter((id): id is string => id !== null && id !== undefined);
       if (seatIds.length > 0) {
-        await this.seatStreamService.publishSeatStatusChanged(order.eventId, {
+        await this.seatStreamService?.publishSeatStatusChanged(order.eventId, {
           seatIds,
           status: "AVAILABLE",
           expiresAt: null,
@@ -935,7 +937,7 @@ export class BookingService {
         seatsByEvent.set(s.eventId, list);
       }
       for (const [eventId, seatIds] of seatsByEvent.entries()) {
-        await this.seatStreamService.publishSeatStatusChanged(eventId, {
+        await this.seatStreamService?.publishSeatStatusChanged(eventId, {
           seatIds,
           status: "AVAILABLE",
           expiresAt: null,

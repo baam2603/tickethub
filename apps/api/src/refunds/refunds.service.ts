@@ -461,7 +461,7 @@ export class RefundsService {
         }
       }
       for (const [eventId, seatIds] of seatsByEvent.entries()) {
-        await this.seatStreamService.publishSeatStatusChanged(eventId, {
+        await this.seatStreamService?.publishSeatStatusChanged(eventId, {
           seatIds,
           status: "AVAILABLE",
           expiresAt: null,
