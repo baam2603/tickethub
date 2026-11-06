@@ -31,7 +31,7 @@
 
 ---
 
-### Tác Vụ 1: Định Nghĩa Schemas & Types Trong `@tickethub/shared`
+### Task 1: Định Nghĩa Schemas & Types Trong `@tickethub/shared`
 
 **Tệp tin:**
 - Tạo mới: `packages/shared/src/schemas/payout.schema.ts`
@@ -60,7 +60,7 @@
 
 ---
 
-### Tác Vụ 2: Thuật Toán Tính Toán Quyết Toán Tài Chính (Payout Calculator) & Unit Test
+### Task 2: Thuật Toán Tính Toán Quyết Toán Tài Chính (Payout Calculator) & Unit Test
 
 **Tệp tin:**
 - Tạo mới: `apps/api/src/payouts/payout-calculator.ts`
@@ -91,7 +91,7 @@
 
 ---
 
-### Tác Vụ 3: Triển Khai `PayoutsService` Và `ReconciliationsService`
+### Task 3: Triển Khai `PayoutsService` Và `ReconciliationsService`
 
 **Tệp tin:**
 - Tạo mới: `apps/api/src/payouts/payouts.service.ts`
@@ -121,7 +121,7 @@
 
 ---
 
-### Tác Vụ 4: Triển Khai Controllers, Module Và Đăng Ký Ứng Dụng
+### Task 4: Triển Khai Controllers, Module Và Đăng Ký Ứng Dụng
 
 **Tệp tin:**
 - Tạo mới: `apps/api/src/payouts/admin-payouts.controller.ts`
@@ -155,7 +155,7 @@
 
 ---
 
-### Tác Vụ 5: Xây Dựng Bộ Kiểm Thử Tích Hợp Đầy Đủ (Integration Tests)
+### Task 5: Xây Dựng Bộ Kiểm Thử Tích Hợp Đầy Đủ (Integration Tests)
 
 **Tệp tin:**
 - Tạo mới: `apps/api/test/payouts.integration.test.ts`
@@ -182,7 +182,7 @@
 
 ---
 
-### Tác Vụ 6: Đồng Bộ Hóa Hợp Đồng API & Kiểm Định Toàn Hệ Thống
+### Task 6: Đồng Bộ Hóa Hợp Đồng API & Kiểm Định Toàn Hệ Thống
 
 **Tệp tin:**
 - Chỉnh sửa: `docs/API_CONTRACT.md`
