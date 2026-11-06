@@ -1,3 +1,4 @@
+import { hasVnpayCredentials } from "./vnpay-config";
 import { Injectable } from "@nestjs/common";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
@@ -64,12 +65,7 @@ export class VnpayApi {
   }
 
   private async post(params: Record<string, string>, fields: string[]) {
-    if (
-      !env.VNPAY_TMN_CODE.trim() ||
-      !env.VNPAY_HASH_SECRET.trim() ||
-      env.VNPAY_TMN_CODE === "TEST_TMN_CODE" ||
-      env.VNPAY_HASH_SECRET === "TEST_HASH_SECRET"
-    ) {
+    if (!hasVnpayCredentials()) {
       throw new Error("VNPay credentials not configured");
     }
     const url = new URL(env.VNPAY_API_URL);

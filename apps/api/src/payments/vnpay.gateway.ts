@@ -1,3 +1,4 @@
+import { hasVnpayCredentials } from "./vnpay-config";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
@@ -42,20 +43,11 @@ function signData(data: string, secret: string): string {
   return createHmac("sha512", secret).update(data, "utf8").digest("hex");
 }
 
-function hasValidConfig(): boolean {
-  return (
-    env.VNPAY_TMN_CODE.trim().length > 0 &&
-    env.VNPAY_HASH_SECRET.trim().length > 0 &&
-    env.VNPAY_TMN_CODE !== "TEST_TMN_CODE" &&
-    env.VNPAY_HASH_SECRET !== "TEST_HASH_SECRET"
-  );
-}
-
 export class VnpayGateway implements PaymentGateway {
   async createPaymentUrl(
     request: CreatePaymentRequest,
   ): Promise<CreatePaymentResult> {
-    if (!hasValidConfig()) {
+    if (!hasVnpayCredentials()) {
       throw new Error("VNPay Sandbox credentials not configured");
     }
 
@@ -137,7 +129,7 @@ export class VnpayGateway implements PaymentGateway {
       transactionRef: null,
     };
 
-    if (!hasValidConfig()) {
+    if (!hasVnpayCredentials()) {
       return invalid;
     }
 

@@ -12,6 +12,7 @@ import {
 
 import { db } from "../database/db";
 import {
+  events,
   orders,
   transactions,
   orderItems,
@@ -139,8 +140,13 @@ export class VnpayIpnService {
       )
         return "ALREADY_PROCESSED";
       const now = new Date();
+      const event = await tx.query.events.findFirst({
+        where: eq(events.id, order.eventId),
+      });
+      const eventUnavailable =
+        event?.status === "SUSPENDED" || event?.status === "CANCELLED";
 
-      const decision = decideVnpayIpn({
+      let decision = decideVnpayIpn({
         signatureValid: true,
         transactionFound: true,
         amountMatches,
@@ -150,13 +156,17 @@ export class VnpayIpnService {
         orderExpired: now >= order.expiresAt,
       });
 
+      if (eventUnavailable && decision === "APPLY_SUCCESS")
+        decision = "MANUAL_REVIEW";
       if (
         decision === "MANUAL_REVIEW" &&
         verified.success &&
         amountMatches &&
         transaction.status === TransactionStatus.PENDING &&
-        transaction.vnpCreateDate &&
-        (order.status === OrderStatus.EXPIRED ||
+        parseVnpayDate(transaction.vnpCreateDate ?? undefined) &&
+        (order.status === OrderStatus.CANCELLED ||
+          order.status === OrderStatus.EXPIRED ||
+          (order.status === OrderStatus.PENDING && eventUnavailable) ||
           (order.status === OrderStatus.PENDING && now >= order.expiresAt)) &&
         /^\d{1,15}$/.test(params.vnp_TransactionNo ?? "") &&
         parseVnpayDate(params.vnp_PayDate)

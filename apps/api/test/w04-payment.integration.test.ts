@@ -133,7 +133,12 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
     return { status: response.status, body: data };
   }
   async function fixture(
-    options: { seated?: boolean; expired?: boolean; lost?: boolean } = {},
+    options: {
+      seated?: boolean;
+      expired?: boolean;
+      lost?: boolean;
+      quantity?: number;
+    } = {},
   ) {
     const [event] = await db
       .insert(events)
@@ -160,9 +165,10 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
         eventId: event!.id,
         name: "GA/VIP",
         price: "100000",
-        capacity: 1,
+        capacity: options.quantity ?? 1,
         isSeated: options.seated ?? false,
-        heldCount: !options.seated && !options.expired ? 1 : 0,
+        heldCount:
+          !options.seated && !options.expired ? (options.quantity ?? 1) : 0,
         soldCount: options.lost && !options.seated ? 1 : 0,
         saleStartTime: new Date(),
         saleEndTime: new Date(Date.now() + 800000000),
@@ -174,8 +180,8 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
         userId: buyer,
         eventId: event!.id,
         orderCode: randomUUID().replaceAll("-", ""),
-        totalAmount: "100000",
-        finalAmount: "100000",
+        totalAmount: String(100000 * (options.quantity ?? 1)),
+        finalAmount: String(100000 * (options.quantity ?? 1)),
         status: options.expired ? OrderStatus.EXPIRED : OrderStatus.PENDING,
         expiresAt: new Date(Date.now() + (options.expired ? -1000 : 300000)),
       })
@@ -206,9 +212,9 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
       orderId: order!.id,
       ticketTypeId: type!.id,
       seatId,
-      quantity: 1,
+      quantity: options.quantity ?? 1,
       unitPrice: "100000",
-      subtotal: "100000",
+      subtotal: String(100000 * (options.quantity ?? 1)),
     });
     return { order: order!, type: type!, seatId };
   }
@@ -995,6 +1001,350 @@ describe("W04-BE2: thanh toan, IPN, QueryDR va worker hoan tien qua HTTP", () =>
       ).status,
       400,
     );
+  });
+  it("Hoan ca don 3 ve: mot giao dich 02, retry QueryDR khong gui lai va hoan tat dong thoi ca nhom", async () => {
+    const f = await fixture({ quantity: 3 });
+    const pay = await payment(f.order.id);
+    assert.equal(
+      (await ipn(pay.body.data.transactionRef, { vnp_Amount: "30000000" })).body
+        .RspCode,
+      "00",
+    );
+    const issued = await db
+      .select()
+      .from(tickets)
+      .where(eq(tickets.orderId, f.order.id));
+    assert.equal(issued.length, 3);
+    const body = {
+      orderId: f.order.id,
+      ticketIds: issued.map((row) => row.id),
+      reason: "Huy ca don nhieu ve",
+    };
+    const key = randomUUID();
+    const response = await http(
+      "/api/v1/refund/request",
+      "POST",
+      body,
+      buyer,
+      key,
+    );
+    assert.equal(response.status, 201, JSON.stringify(response.body));
+    const event = await eventFor(f.order.id, "REFUND_REQUESTED");
+    loseRefundResponse = true;
+    await processPaymentOutboxOnce(api, event.id);
+    const pending = await db
+      .select()
+      .from(refunds)
+      .where(eq(refunds.orderId, f.order.id));
+    assert.equal(pending.length, 3);
+    assert.ok(pending.every((row) => row.status === RefundStatus.PROCESSING));
+    assert.equal(new Set(pending.map((row) => row.providerGroupId)).size, 1);
+    assert.equal(pending.filter((row) => row.providerRequestId).length, 1);
+    await db
+      .update(outbox)
+      .set({ nextRetryAt: new Date() })
+      .where(eq(outbox.id, event.id));
+    await Promise.all(
+      Array.from({ length: 5 }, () => processPaymentOutboxOnce(api, event.id)),
+    );
+    const saved = await db
+      .select()
+      .from(refunds)
+      .where(eq(refunds.orderId, f.order.id));
+    assert.ok(saved.every((row) => row.status === RefundStatus.COMPLETED));
+    const calls = providerCalls.filter(
+      (row) => row.vnp_TxnRef === pay.body.data.transactionRef,
+    );
+    assert.equal(calls.filter((row) => row.vnp_Command === "refund").length, 1);
+    assert.equal(
+      calls.find((row) => row.vnp_Command === "refund")?.vnp_TransactionType,
+      "02",
+    );
+    assert.equal(
+      calls.find((row) => row.vnp_Command === "refund")?.vnp_Amount,
+      "30000000",
+    );
+    assert.ok(calls.some((row) => row.vnp_Command === "querydr"));
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(outbox)
+          .where(
+            and(
+              eq(outbox.eventType, "REFUND_COMPLETED"),
+              sql`${outbox.payload}->>'orderId' = ${f.order.id}`,
+            ),
+          )
+      ).length,
+      1,
+    );
+    assert.deepEqual(
+      (await http("/api/v1/refund/request", "POST", body, buyer, key)).body,
+      response.body,
+    );
+  });
+
+  it("Hoan tung dot don 3 ve: 1 ve roi 2 ve deu la 03, tong tien khong vuot giao dich goc", async () => {
+    const f = await fixture({ quantity: 3 });
+    const pay = await payment(f.order.id);
+    await ipn(pay.body.data.transactionRef, { vnp_Amount: "30000000" });
+    const issued = await db
+      .select()
+      .from(tickets)
+      .where(eq(tickets.orderId, f.order.id));
+    for (const ticketIds of [
+      [issued[0]!.id],
+      issued.slice(1).map((row) => row.id),
+    ]) {
+      const response = await http(
+        "/api/v1/refund/request",
+        "POST",
+        { orderId: f.order.id, ticketIds, reason: "Huy mot phan" },
+        buyer,
+        randomUUID(),
+      );
+      assert.equal(response.status, 201, JSON.stringify(response.body));
+      const events = await db
+        .select()
+        .from(outbox)
+        .where(
+          and(
+            eq(outbox.eventType, "REFUND_REQUESTED"),
+            eq(outbox.status, OutboxStatus.PENDING),
+            sql`${outbox.payload}->>'orderId' = ${f.order.id}`,
+          ),
+        );
+      assert.equal(events.length, 1);
+      await processPaymentOutboxOnce(api, events[0]!.id);
+    }
+    const sent = providerCalls.filter(
+      (row) =>
+        row.vnp_Command === "refund" &&
+        row.vnp_TxnRef === pay.body.data.transactionRef,
+    );
+    assert.deepEqual(
+      sent.map((row) => [row.vnp_TransactionType, row.vnp_Amount]),
+      [
+        ["03", "10000000"],
+        ["03", "20000000"],
+      ],
+    );
+    assert.ok(
+      (
+        await db.select().from(refunds).where(eq(refunds.orderId, f.order.id))
+      ).every((row) => row.status === RefundStatus.COMPLETED),
+    );
+  });
+
+  it("IPN thanh cong tren don CANCELLED hoac su kien SUSPENDED/CANCELLED tu dong hoan tien, khong cap ve", async () => {
+    for (const state of [
+      "ORDER_CANCELLED",
+      "SUSPENDED",
+      "CANCELLED",
+    ] as const) {
+      const f = await fixture();
+      const pay = await payment(f.order.id);
+      if (state === "ORDER_CANCELLED") {
+        await db
+          .update(orders)
+          .set({ status: OrderStatus.CANCELLED })
+          .where(eq(orders.id, f.order.id));
+        await db
+          .update(ticketTypes)
+          .set({ heldCount: 0 })
+          .where(eq(ticketTypes.id, f.type.id));
+      } else
+        await db
+          .update(events)
+          .set({ status: state })
+          .where(eq(events.id, f.order.eventId));
+      const first = await ipn(pay.body.data.transactionRef);
+      assert.equal(first.body.RspCode, "00", JSON.stringify(first.body));
+      assert.equal(
+        (await orderState(f.order.id))?.status,
+        OrderStatus.PAYMENT_EXPIRED_REFUND_PENDING,
+      );
+      assert.equal(
+        (await ipn(pay.body.data.transactionRef)).body.RspCode,
+        "02",
+      );
+      assert.equal(
+        (await db.select().from(tickets).where(eq(tickets.orderId, f.order.id)))
+          .length,
+        0,
+      );
+      const event = await eventFor(f.order.id, "REFUND_REQUESTED");
+      await processPaymentOutboxOnce(api, event.id);
+      assert.equal(
+        (await orderState(f.order.id))?.status,
+        OrderStatus.REFUNDED,
+      );
+      const sent = providerCalls.filter(
+        (row) =>
+          row.vnp_Command === "refund" &&
+          row.vnp_TxnRef === pay.body.data.transactionRef,
+      );
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0]?.vnp_TransactionType, "02");
+      const type = await db.query.ticketTypes.findFirst({
+        where: eq(ticketTypes.id, f.type.id),
+      });
+      assert.equal(type?.heldCount, 0);
+      assert.equal(type?.soldCount, 0);
+    }
+  });
+
+  it("QueryDR dung IP merchant cau hinh, khong dung IP buyer", async () => {
+    const f = await fixture();
+    const pay = await payment(f.order.id);
+    const previous = env.VNPAY_REFUND_IP;
+    env.VNPAY_REFUND_IP = "203.0.113.10";
+    try {
+      const response = await http(
+        `/api/v1/payments/orders/${f.order.id}/vnpay/query`,
+      );
+      assert.equal(response.status, 201);
+      const sent = providerCalls.findLast(
+        (row) =>
+          row.vnp_Command === "querydr" &&
+          row.vnp_TxnRef === pay.body.data.transactionRef,
+      );
+      assert.equal(sent?.vnp_IpAddr, "203.0.113.10");
+    } finally {
+      env.VNPAY_REFUND_IP = previous;
+    }
+  });
+  it("Refund legacy dang PROCESSING duoc doi soat rieng truoc khi gom cac ve chua gui", async () => {
+    const f = await fixture({ quantity: 3 });
+    const pay = await payment(f.order.id);
+    await ipn(pay.body.data.transactionRef, { vnp_Amount: "30000000" });
+    const issued = await db
+      .select()
+      .from(tickets)
+      .where(eq(tickets.orderId, f.order.id));
+    const response = await http(
+      "/api/v1/refund/request",
+      "POST",
+      {
+        orderId: f.order.id,
+        ticketIds: issued.map((row) => row.id),
+        reason: "Legacy interrupted worker",
+      },
+      buyer,
+      randomUUID(),
+    );
+    assert.equal(response.status, 201);
+    const original = await eventFor(f.order.id, "REFUND_REQUESTED");
+    const [legacyEvent] = await db
+      .insert(outbox)
+      .values({
+        eventType: "REFUND_REQUESTED",
+        payload: { orderId: f.order.id, refundId: response.body.refundIds[0] },
+      })
+      .returning();
+    loseRefundResponse = true;
+    await processPaymentOutboxOnce(api, legacyEvent!.id);
+    // Metadata đúng dạng worker cũ: có request ID nhưng chưa có cột nhóm.
+    await db
+      .update(refunds)
+      .set({ providerGroupId: null, providerAmount: null })
+      .where(eq(refunds.id, response.body.refundIds[0]));
+    await processPaymentOutboxOnce(api, original.id);
+    const saved = await db
+      .select()
+      .from(refunds)
+      .where(eq(refunds.orderId, f.order.id));
+    assert.ok(saved.every((row) => row.status === RefundStatus.COMPLETED));
+    const sent = providerCalls.filter(
+      (row) =>
+        row.vnp_Command === "refund" &&
+        row.vnp_TxnRef === pay.body.data.transactionRef,
+    );
+    assert.deepEqual(
+      sent.map((row) => [row.vnp_TransactionType, row.vnp_Amount]),
+      [
+        ["03", "10000000"],
+        ["03", "20000000"],
+      ],
+    );
+    await db
+      .update(outbox)
+      .set({ nextRetryAt: new Date() })
+      .where(eq(outbox.id, legacyEvent!.id));
+    const calls = providerCalls.length;
+    await processPaymentOutboxOnce(api, legacyEvent!.id);
+    assert.equal(providerCalls.length, calls);
+  });
+
+  it("Huy tat ca ve nhung chinh sach chi hoan 50% van gui 03", async () => {
+    const f = await fixture({ quantity: 3 });
+    const pay = await payment(f.order.id);
+    await ipn(pay.body.data.transactionRef, { vnp_Amount: "30000000" });
+    await db
+      .update(events)
+      .set({ startTime: new Date(Date.now() + 5 * 86400000) })
+      .where(eq(events.id, f.order.eventId));
+    const issued = await db
+      .select()
+      .from(tickets)
+      .where(eq(tickets.orderId, f.order.id));
+    const response = await http(
+      "/api/v1/refund/request",
+      "POST",
+      {
+        orderId: f.order.id,
+        ticketIds: issued.map((row) => row.id),
+        reason: "Huy theo chinh sach 50%",
+      },
+      buyer,
+      randomUUID(),
+    );
+    assert.equal(response.status, 201);
+    assert.equal(response.body.refundAmount, 150000);
+    assert.equal(response.body.orderStatus, OrderStatus.REFUNDED);
+    await processPaymentOutboxOnce(
+      api,
+      (await eventFor(f.order.id, "REFUND_REQUESTED")).id,
+    );
+    const sent = providerCalls.filter(
+      (row) =>
+        row.vnp_Command === "refund" &&
+        row.vnp_TxnRef === pay.body.data.transactionRef,
+    );
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.vnp_TransactionType, "03");
+    assert.equal(sent[0]?.vnp_Amount, "15000000");
+  });
+
+  it("Su kien SUSPENDED nhung IPN thieu metadata hoac sai tien khong duoc cap ve/tao refund", async () => {
+    const f = await fixture();
+    const pay = await payment(f.order.id);
+    await db
+      .update(events)
+      .set({ status: "SUSPENDED" })
+      .where(eq(events.id, f.order.eventId));
+    await db
+      .update(transactions)
+      .set({ vnpCreateDate: null })
+      .where(eq(transactions.orderId, f.order.id));
+    assert.equal((await ipn(pay.body.data.transactionRef)).body.RspCode, "99");
+    assert.equal(
+      (await ipn(pay.body.data.transactionRef, { vnp_Amount: "1" })).body
+        .RspCode,
+      "04",
+    );
+    assert.equal(
+      (await db.select().from(tickets).where(eq(tickets.orderId, f.order.id)))
+        .length,
+      0,
+    );
+    assert.equal(
+      (await db.select().from(refunds).where(eq(refunds.orderId, f.order.id)))
+        .length,
+      0,
+    );
+    assert.equal((await orderState(f.order.id))?.status, OrderStatus.PENDING);
   });
   it("QueryDR ky ca PromotionCode/Amount va chap nhan so tien JSON integer", async () => {
     const f = await fixture();

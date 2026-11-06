@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 import { setTimeout as delay } from "node:timers/promises";
 import { sqlClient } from "../database/db";
 import { VnpayApi } from "../payments/vnpay-api";
@@ -25,7 +26,11 @@ async function main() {
 }
 main()
   .catch(() => {
-    console.error("Payment worker failed");
+    Logger.error(
+      "PAYMENT_WORKER_FAILED: kiểm tra kết nối DB và cấu hình handler",
+      undefined,
+      "PaymentWorker",
+    );
     process.exitCode = 1;
   })
   .finally(async () => {

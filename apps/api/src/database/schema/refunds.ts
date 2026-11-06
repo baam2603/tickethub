@@ -1,4 +1,5 @@
 import {
+  type AnyPgColumn,
   pgTable,
   uuid,
   varchar,
@@ -24,6 +25,10 @@ export const refunds = pgTable("refunds", {
     .default(RefundStatus.PENDING)
     .$type<RefundStatus>(),
   providerRequestId: varchar("provider_request_id", { length: 32 }).unique(),
+  providerGroupId: uuid("provider_group_id").references(
+    (): AnyPgColumn => refunds.id,
+  ),
+  providerAmount: numeric("provider_amount", { precision: 14, scale: 2 }),
   lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
   nextRetryAt: timestamp("next_retry_at", { withTimezone: true })
     .notNull()

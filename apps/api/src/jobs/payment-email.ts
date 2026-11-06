@@ -23,7 +23,7 @@ export async function paymentEmailContent(eventType: string, payload: unknown) {
     subject:
       eventType === "ORDER_PAID"
         ? "[TicketHub] Xac nhan ve da thanh toan"
-        : "[TicketHub] Da hoan tien giao dich qua han",
+        : "[TicketHub] Xac nhan hoan tien",
     text: [
       `Xin chao ${row.buyer.fullName},`,
       `Don hang: ${row.order.orderCode}`,

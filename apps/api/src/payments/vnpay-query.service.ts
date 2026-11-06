@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { PaymentProvider } from "@tickethub/shared";
+import { env } from "../config/env.config";
 import { db } from "../database/db";
 import { orders, transactions } from "../database/schema";
 import { VnpayApi } from "./vnpay-api";
@@ -19,7 +20,7 @@ export class VnpayQueryService {
     @Inject(VnpayIpnService) private readonly ipn: VnpayIpnService,
   ) {}
 
-  async query(userId: string, orderId: string, ipAddress: string) {
+  async query(userId: string, orderId: string) {
     const [payment] = await db
       .select({ payment: transactions })
       .from(transactions)
@@ -42,7 +43,7 @@ export class VnpayQueryService {
       result = await this.api.queryTransaction({
         transactionRef: payment.payment.transactionRef,
         transactionDate: payment.payment.vnpCreateDate,
-        ipAddress,
+        ipAddress: env.VNPAY_REFUND_IP,
       });
     } catch {
       throw new ServiceUnavailableException(

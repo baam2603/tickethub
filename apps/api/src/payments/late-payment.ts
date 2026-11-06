@@ -52,7 +52,11 @@ export async function settleLatePayment(
         .select()
         .from(events)
         .where(eq(events.id, order.eventId));
-      if (event?.status !== EventStatus.PUBLISHED) throw new ReservationLost();
+      if (
+        order.status === OrderStatus.CANCELLED ||
+        event?.status !== EventStatus.PUBLISHED
+      )
+        throw new ReservationLost();
       if (seatIds.length)
         await stock
           .select()

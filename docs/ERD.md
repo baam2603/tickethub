@@ -235,6 +235,8 @@ erDiagram
         text reason
         enum status "PENDING | PROCESSING | COMPLETED | FAILED"
         varchar provider_request_id UK
+        uuid provider_group_id FK
+        numeric provider_amount
         timestamptz last_attempt_at
         timestamptz next_retry_at
         varchar provider_refund_ref
@@ -521,21 +523,21 @@ CREATE INDEX idx_seats_hold_expiry ON seats(status, hold_expires_at) WHERE statu
 
 Lưu thông tin đơn hàng và thời hạn thanh toán.
 
-| Cột             | Kiểu          | Ràng buộc                                                                                                      | Diễn giải                          |
-| :-------------- | :------------ | :------------------------------------------------------------------------------------------------------------- | :--------------------------------- |
-| id              | UUID          | PRIMARY KEY DEFAULT gen_random_uuid()                                                                          | Khóa chính                         |
-| order_code      | VARCHAR(32)   | NOT NULL UNIQUE                                                                                                | Mã đơn hàng hiển thị               |
-| user_id         | UUID          | NOT NULL REFERENCES users(id)                                                                                  | Người mua (Bắt buộc vai trò BUYER) |
-| event_id        | UUID          | NOT NULL REFERENCES events(id)                                                                                 | Sự kiện                            |
-| total_amount    | NUMERIC(14,2) | NOT NULL CHECK (total_amount >= 0)                                                                             | Tổng tiền gốc                      |
-| discount_amount | NUMERIC(14,2) | NOT NULL DEFAULT 0 CHECK (discount_amount >= 0)                                                                | Số tiền giảm                       |
-| final_amount    | NUMERIC(14,2) | NOT NULL CHECK (final_amount >= 0)                                                                             | Số tiền thực trả                   |
-| status          | VARCHAR(32)   | NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'CANCELLED', 'REFUNDED')) | Trạng thái đơn                     |
-| expires_at      | TIMESTAMPTZ   | NOT NULL                                                                                                       | Thời điểm hết hạn giữ chỗ          |
-| paid_at         | TIMESTAMPTZ   | NULL                                                                                                           | Thời điểm hoàn tất thanh toán      |
-| voucher_code    | VARCHAR(50)   | NULL                                                                                                           | Mã giảm giá                        |
-| created_at      | TIMESTAMPTZ   | NOT NULL DEFAULT now()                                                                                         | Thời điểm tạo                      |
-| updated_at      | TIMESTAMPTZ   | NOT NULL DEFAULT now()                                                                                         | Thời điểm cập nhật cuối            |
+| Cột             | Kiểu          | Ràng buộc                                                                                                                                                 | Diễn giải                          |
+| :-------------- | :------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------- |
+| id              | UUID          | PRIMARY KEY DEFAULT gen_random_uuid()                                                                                                                     | Khóa chính                         |
+| order_code      | VARCHAR(32)   | NOT NULL UNIQUE                                                                                                                                           | Mã đơn hàng hiển thị               |
+| user_id         | UUID          | NOT NULL REFERENCES users(id)                                                                                                                             | Người mua (Bắt buộc vai trò BUYER) |
+| event_id        | UUID          | NOT NULL REFERENCES events(id)                                                                                                                            | Sự kiện                            |
+| total_amount    | NUMERIC(14,2) | NOT NULL CHECK (total_amount >= 0)                                                                                                                        | Tổng tiền gốc                      |
+| discount_amount | NUMERIC(14,2) | NOT NULL DEFAULT 0 CHECK (discount_amount >= 0)                                                                                                           | Số tiền giảm                       |
+| final_amount    | NUMERIC(14,2) | NOT NULL CHECK (final_amount >= 0)                                                                                                                        | Số tiền thực trả                   |
+| status          | VARCHAR(32)   | NOT NULL DEFAULT 'PENDING' (giá trị ứng dụng: PENDING, PAID, EXPIRED, FAILED, CANCELLED, REFUNDED, PAYMENT_EXPIRED_REFUND_PENDING; DB chưa áp dụng CHECK) | Trạng thái đơn                     |
+| expires_at      | TIMESTAMPTZ   | NOT NULL                                                                                                                                                  | Thời điểm hết hạn giữ chỗ          |
+| paid_at         | TIMESTAMPTZ   | NULL                                                                                                                                                      | Thời điểm hoàn tất thanh toán      |
+| voucher_code    | VARCHAR(50)   | NULL                                                                                                                                                      | Mã giảm giá                        |
+| created_at      | TIMESTAMPTZ   | NOT NULL DEFAULT now()                                                                                                                                    | Thời điểm tạo                      |
+| updated_at      | TIMESTAMPTZ   | NOT NULL DEFAULT now()                                                                                                                                    | Thời điểm cập nhật cuối            |
 
 > **Ràng buộc nghiệp vụ toàn vẹn (Integrity Constraint)**: Cột `user_id` chỉ liên kết với bản ghi người dùng có `role = 'BUYER'`. Các tài khoản có vai trò `ADMIN`, `ORGANIZER` hoặc `GATE_STAFF` bị cấm tạo đơn hàng và sở hữu vé cá nhân nhằm ngăn ngừa xung đột lợi ích và găm vé nội bộ.
 
@@ -633,6 +635,8 @@ Lưu các bản ghi yêu cầu hoàn tiền.
 | reason              | TEXT          | NOT NULL                                                                                      | Lý do hoàn tiền                                                       |
 | status              | VARCHAR(20)   | NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')) | Trạng thái hoàn tiền                                                  |
 | provider_request_id | VARCHAR(32)   | UNIQUE, NULL                                                                                  | Mã yêu cầu lưu trước khi gọi VNPay; không gửi lại khi kết quả chưa rõ |
+| provider_group_id   | UUID          | NULL REFERENCES refunds(id)                                                                   | Nhóm gửi VNPay; tham chiếu refund leader, legacy có thể NULL          |
+| provider_amount     | NUMERIC(14,2) | NULL                                                                                          | Tổng tiền snapshot của nhóm, chỉ lưu trên leader                      |
 | last_attempt_at     | TIMESTAMPTZ   | NULL                                                                                          | Thời điểm dành quyền gửi yêu cầu hoàn tiền                            |
 | next_retry_at       | TIMESTAMPTZ   | NOT NULL, DEFAULT NOW()                                                                       | Thời điểm đối soát tiếp theo sau lỗi                                  |
 | provider_refund_ref | VARCHAR(100)  | NULL                                                                                          | Mã phản hồi hoàn tiền từ VNPay                                        |

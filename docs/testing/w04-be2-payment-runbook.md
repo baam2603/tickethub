@@ -26,7 +26,7 @@ Cấu hình an toàn trong môi trường hoặc tệp .env được Git bỏ qu
 - VNPAY_TMN_CODE, VNPAY_HASH_SECRET: thông tin merchant sandbox thật. Hash secret cần là giá trị cục bộ để ký HMAC, không dùng placeholder thay thế ở HTTP proxy.
 - VNPAY_URL: URL payment của sandbox. VNPAY_RETURN_URL: trang kết quả của web.
 - VNPAY_API_URL: mặc định https://sandbox.vnpayment.vn/merchant_webapi/api/transaction.
-- VNPAY_REFUND_IP: địa chỉ IP đúng với cấu hình merchant. VNPAY_API_TIMEOUT_MS mặc định 5000.
+- VNPAY_REFUND_IP: IP merchant đã đăng ký, dùng chung cho Refund và QueryDR; không dùng IP buyer. Loopback chỉ dành cho test cục bộ. VNPAY_API_TIMEOUT_MS mặc định 5000.
 - ENABLE_VNPAY_IPN_PROCESSING=true: mở endpoint IPN; khai báo URL API công khai với VNPay. Return URL không thay thế IPN.
 - ENABLE_VNPAY_REFUNDS=true: cho phép worker gọi refund. RESEND_API_KEY, EMAIL_FROM và ENABLE_PAYMENT_EMAIL=true: cho phép gửi email thật.
 - Giữ proxy và CA của môi trường; HTTP client hỗ trợ proxy và không tắt xác minh TLS.
@@ -82,3 +82,21 @@ transaction sẽ từ chối/rollback để không làm mất cấu hình. Khôn
 giá mua snapshot, validation request, clock/fencing worker, SSE không báo còn ghế khi IPN cũ bị hoàn tiền,
 seed venues/layouts chạy lặp. Test W04 chỉ kiểm tra thanh toán/hủy/refund, không import module W05.
 Sau khi W04 được merge, cập nhật W05 theo đúng lịch sử này; W05 bổ sung migration 0006 riêng.
+
+## Bổ sung sau review: hoàn nhiều vé và nâng cấp DB
+
+- Migration `0006_w04-refund-groups.sql` chỉ thêm hai cột nullable và FK tự tham chiếu vào refunds, không thêm bảng, không sửa migration 0005 đã phát hành. Dừng worker cũ trước khi triển khai, chạy migrate rồi khởi động worker mới. Giữ API cũ hoạt động được với các cột nullable.
+- Một yêu cầu hoàn cả giao dịch nhiều vé gửi một lần `02`; từng vé vẫn giữ refund riêng cho kiểm toán/báo cáo. Hoàn một phần hoặc các đợt sau gửi `03`. Group ID, request ID và tổng tiền được ghi trước HTTP; retry đối soát cùng nhóm, không gửi lại.
+- Refund legacy đã có request ID được đối soát riêng. Không reset request ID hoặc gom các giao dịch đã gửi.
+- IPN trên đơn đã hủy hoặc sự kiện đình chỉ/hủy tạo refund 100%, không cấp vé; callback sai chữ ký/sai tiền/thiếu metadata vẫn bị từ chối hoặc chuyển đối soát.
+- ERD liệt kê trạng thái orders ở lớp ứng dụng và ghi rõ DB chưa thực thi CHECK, thay vì mô tả một constraint không tồn tại.
+- Test migration dựng đủ bốn MV legacy và năm index, so sánh dữ liệu và ngữ nghĩa SQL qua nhiều trạng thái đơn, chạy REFRESH CONCURRENTLY; ACL/dependency tùy chỉnh làm rollback an toàn.
+
+Để dọn cả audit_log mà vẫn giữ nguyên quy tắc append-only, chạy toàn bộ API test trong DB tạm; runner migrate DB mới và DROP DB trong finally. Tài khoản test cần quyền CREATE DATABASE, không dùng URL của DB thật:
+
+```bash
+# DATABASE_URL phải trỏ tới DB chuyên kiểm thử có tên kết thúc bằng _test.
+pnpm --filter @tickethub/api test:isolated
+```
+
+Test HTTP dùng provider fixture để xác minh HMAC, payload và lỗi mạng; chưa thay thế nghiệm thu VNPay sandbox. Khi có merchant thật: cấu hình IP đã đăng ký, tạo giao dịch thử nhỏ, gọi QueryDR kiểm tra loại 01 và trạng thái, thử hoàn cả đơn nhiều vé bằng 02 và hoàn từng phần bằng 03, lưu mã giao dịch/kết quả đã che dữ liệu nhạy cảm vào PR. Không gửi hash secret trong bình luận.
