@@ -781,9 +781,9 @@ Tra cứu thủ công vé dự phòng bằng mã vé tĩnh 32 ký tự kết h�
 }
 ```
 
-### [PLANNED] Hủy vé và hoàn tiền (`/refund`)
+### Hủy vé và hoàn tiền (`/refund`)
 
-#### [PLANNED] `POST /api/v1/refund/preview`
+#### `POST /api/v1/refund/preview`
 
 Tính trước số tiền hoàn lại theo chính sách trước khi xác nhận.
 
@@ -803,7 +803,7 @@ Tính trước số tiền hoàn lại theo chính sách trước khi xác nhậ
 }
 ```
 
-#### [PLANNED] `POST /api/v1/refund/request`
+#### `POST /api/v1/refund/request`
 
 Gửi yêu cầu hủy vé.
 
@@ -1066,17 +1066,51 @@ Truy vấn danh sách lịch sử kiểm toán bất biến theo sự kiện ph�
 }
 ```
 
-#### [PLANNED] `GET /api/v1/admin/reconciliations`
+#### `GET /api/v1/admin/reconciliations`
 
-Lấy danh sách đối soát giao dịch với dữ liệu VNPay.
+Lấy danh sách đối soát giao dịch giữa đơn hàng hệ thống và dữ liệu thanh toán VNPay.
 
-- Response 200: Danh sách giao dịch khớp và các bản ghi phát hiện chênh lệch.
+- Header: `Authorization: Bearer <adminToken>`
+- Query params: `eventId` (tùy chọn), `status` (`ALL`, `MATCHED`, `AMOUNT_MISMATCH`, `MISSING_TRANSACTION`, `ORPHAN_TRANSACTION`), `page`, `limit`
+- Response 200: Danh sách giao dịch đối soát, phân loại trạng thái và khối thống kê tổng hợp `summary`.
 
-#### [PLANNED] `POST /api/v1/admin/payouts/:id/approve`
+#### `GET /api/v1/admin/payouts`
+
+Lấy danh sách các lệnh quyết toán chi trả doanh thu cho Ban tổ chức trên toàn hệ thống.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Query params: `status` (`PENDING`, `HOLD`, `PAID_OUT`), `organizerId`, `eventId`, `page`, `limit`
+- Response 200: Danh sách lệnh chi trả kèm thông tin sự kiện và phân trang.
+
+#### `POST /api/v1/admin/payouts/generate`
+
+Tính toán doanh thu sự kiện, khấu trừ tiền hoàn vé, phí sàn (5%) và phí cổng VNPay (1.5%) để tạo hoặc cập nhật lệnh quyết toán ở trạng thái `PENDING`.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Request body: `{ "eventId": "uuid-event" }`
+- Response 200: Thông tin chi tiết lệnh quyết toán đã tính toán.
+
+#### `POST /api/v1/admin/payouts/:id/approve`
 
 Xác nhận phê duyệt lệnh chi trả tiền bán vé cho ban tổ chức.
 
-- Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT`.
+- Header: `Authorization: Bearer <adminToken>`
+- Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT` và ghi vết kiểm toán vào `audit_log`.
+
+#### `POST /api/v1/admin/payouts/:id/hold`
+
+Tạm giữ lệnh chi trả khi phát hiện khiếu nại hoặc tranh chấp vé.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Request body: `{ "reason": "Phát hiện đơn hàng tranh chấp đang khiếu nại" }`
+- Response 200: Lệnh chi trả chuyển trạng thái `HOLD` kèm lý do.
+
+#### `POST /api/v1/admin/payouts/:id/recalculate`
+
+Tính toán lại các con số doanh thu, tiền hoàn và phí cho lệnh chi trả đang ở trạng thái `PENDING` hoặc `HOLD`.
+
+- Header: `Authorization: Bearer <adminToken>`
+- Response 200: Lệnh chi trả với các con số cập nhật mới nhất.
 
 #### `POST /api/v1/admin/venues`
 
@@ -1277,6 +1311,14 @@ Ban tổ chức nộp sự kiện để quản trị viên phê duyệt (chuyể
 
 - Header: `Authorization: Bearer <organizerToken>`
 - Response 200: Sự kiện chuyển trạng thái chờ duyệt
+
+#### `GET /api/v1/organizer/payouts`
+
+Ban tổ chức tra cứu danh sách các khoản quyết toán chi trả của các sự kiện do chính mình sở hữu.
+
+- Header: `Authorization: Bearer <organizerToken>`
+- Query params: `page`, `limit`
+- Response 200: Danh sách các lệnh chi trả kèm số tiền thực nhận (`netPayout`) và trạng thái.
 
 ---
 
