@@ -890,7 +890,7 @@ Hàng đợi xuất báo cáo bền vững trong PostgreSQL; dữ liệu file n�
 | created_at    | TIMESTAMPTZ  | NOT NULL                        | Ngày tạo                           |
 | updated_at    | TIMESTAMPTZ  | NOT NULL                        | Ngày cập nhật/lease                |
 
-Migration 0003_w05-staff-reporting.sql tạo MV thực tế: mv_event_sales_summary và mv_event_ticket_sales. Migration tổng hợp riêng orders, refunds, tickets trước khi join, tránh nhân doanh thu khi đơn có nhiều vé hoặc nhiều refund. Worker refresh hai MV bằng CONCURRENTLY dưới advisory lock để tránh nhiều worker refresh trùng. MV không được ánh xạ thành pgTable vì chỉ đọc qua SQL tĩnh.
+Migration 0006_w05-staff-reporting.sql tạo MV thực tế: mv_event_sales_summary và mv_event_ticket_sales. Migration tổng hợp riêng orders, refunds, tickets trước khi join, tránh nhân doanh thu khi đơn có nhiều vé hoặc nhiều refund. Worker refresh hai MV bằng CONCURRENTLY dưới advisory lock để tránh nhiều worker refresh trùng. MV không được ánh xạ thành pgTable vì chỉ đọc qua SQL tĩnh.
 
 ### Mở rộng report_exports và MV báo cáo (0004, 0005)
 
@@ -908,3 +908,5 @@ Phân bổ giữ tổng tiền chính xác đến cent; hoàn theo vé không nh
 Worker refresh cả bốn MV trong cùng transaction repeatable read/advisory lock; unique index hỗ trợ CONCURRENTLY.
 MV chỉ đọc qua SQL, không ánh xạ thành pgTable. Hoàn tất file ghi outbox REPORT_EXPORT_COMPLETED trong cùng transaction;
 không thêm PII vào payload outbox, chỉ exportId.
+
+Bản PR W05 kế thừa W04 dùng journal 0000-0004 upstream, 0005 W04 và 0006 W05. Tổng 21 bảng public, gồm đủ venues/venue_layouts và ba bảng W05; MV không tính như BASE TABLE.

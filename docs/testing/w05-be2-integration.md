@@ -112,8 +112,8 @@ Nhân viên/BTC không đủ trạng thái hoặc role vẫn bị 403.
 
 ## Triển khai API và worker
 
-Chạy migration 0004 và 0005 sau migration tuần 5 hiện có. Không sửa migration đã áp dụng ở môi trường khác.
-Nếu merge nhánh tuần 4 có migration cùng chỉ số 0003, phải xử lý chuỗi migration khi tích hợp, không chạy hai lịch sử cạnh tranh.
+Trên nhánh PR W05, migration riêng là 0006_w05-staff-reporting.sql, sau 0005_w04-provider-integration.sql của W04 và 0000-0004 gốc. Không chạy lại các file migration W04/W05 cũ.
+Nộp PR W05 sau khi W03 và W04 đã merge vào unstable bản gốc. Nhánh đã kế thừa W04 để giữ một chuỗi migration; PR W05 chỉ nên review delta so với W04.
 API và worker bắt buộc dùng cùng DATABASE_URL và cùng thư mục REPORT_EXPORT_DIR tuyệt đối trên shared volume.
 Production thiếu đường dẫn tuyệt đối sẽ không tạo/tải file. Không dùng thư mục public.
 
@@ -160,3 +160,29 @@ Nhận job, retry, lease và hạn file dùng giờ PostgreSQL thay vì so sánh
 Bộ W05 hiện có 19 ca, gồm đối chứng đồng hồ chậm/nhanh và kiểm tra không bỏ qua backoff.
 
 Khi chạy suite tự động, dừng report worker riêng đang trỏ vào cùng database test để tránh hai tiến trình tranh job. Suite tự khởi động API và gọi worker, không cần bật dev backend hay worker bên ngoài. Bản sửa đồng hồ không yêu cầu migration mới.
+
+## Nhánh PR W05 đã chuẩn bị lại
+
+Nền là nhánh W04 đã sửa, kế thừa W03 và upstream unstable 1964f85. Diff W05 chỉ thêm staff/gate/report,
+clock worker báo cáo và kiểm thử tích hợp báo cáo với thanh toán đã có ở W04.
+Validation dùng helper chung từ W04, không sao chép ngược module báo cáo vào W04.
+Schema cuối 21 bảng (18 nền + organizer_staff, gate_checkin_logs, report_exports), bốn MV.
+Không phục hồi Waiting Room. Không force-push các nhánh cũ; commit mới giữ lịch sử để các PR hiện tại nhận cập nhật.
+Thứ tự nộp/merge: W03, W04, W05. Khi PR trước đã merge, cập nhật metadata/base PR sau nếu GitHub chưa tự tính lại.
+
+## Kết quả chuẩn bị ba PR riêng (06/11/2026)
+
+| Nhánh           | API tests    | Schema DB mới | Migration riêng               |
+| --------------- | ------------ | ------------- | ----------------------------- |
+| W03             | 225/225 PASS | 18 bảng       | Không thêm                    |
+| W04 kế thừa W03 | 242/242 PASS | 18 bảng       | 0005_w04-provider-integration |
+| W05 kế thừa W04 | 261/261 PASS | 21 bảng       | 0006_w05-staff-reporting      |
+
+Mỗi nhánh có 28 test web và 35 root PR/CI tests PASS; lint, typecheck, format, doc parity và db:generate đều PASS.
+API build từng nhánh PASS. Kiểm thử dùng DB/Redis riêng. Không có file workflow hoặc gate bị sửa trong diff từng PR.
+Kiểm tra nâng cấp DB W05 legacy qua W04 rồi W05 giữ đơn PAID, final_amount=100, một vé và paid_revenue=100;
+giữ lại năm index của bốn MV. Chưa gửi provider thật hoặc chạy E2E FE1 trên ba nhánh PR.
+Build web toàn dự án vẫn phụ thuộc tải Google Fonts, đã bị chặn ở môi trường cloud trước đó.
+
+Nếu nhóm squash/rebase PR trước khi merge, cần fetch và merge upstream/unstable mới vào nhánh kế tiếp
+để GitHub tính lại diff. Không cần force-push. Các nhánh cũ giữ tên để PR đang mở tự nhận commit mới.

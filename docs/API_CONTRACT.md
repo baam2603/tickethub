@@ -1436,6 +1436,7 @@ HTTP tối đa 10000 dòng, vượt trả 422 REPORT_TOO_LARGE và hướng sang
 vượt trả job FAILED REPORT_TOO_LARGE, không xuất thiếu dòng. Giới hạn mới thay thế giới hạn export 10000 dòng phía trên.
 Danh sách staff, cổng, phân công, checkins và exports giữ data dạng mảng, thêm meta page/limit/hasMore.
 Outbox REPORT_EXPORT_COMPLETED được ghi nguyên tử với hoàn tất job; gửi email cần cấu hình riêng, link vào FE có xác thực.
+
 ### Search W03: xử lý keyword và độ liên quan
 
 Keyword được trim/normalize NFC. Keyword dưới hai ký tự bỏ điều kiện full-text nhưng vẫn áp dụng bộ lọc.

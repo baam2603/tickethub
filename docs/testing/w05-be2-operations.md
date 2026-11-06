@@ -66,4 +66,4 @@ Giữ NODE_ENV=test, database riêng có hậu tố _test và Redis database ri�
 
 ## Bản hoàn thiện tích hợp FE1
 
-Xem [hợp đồng và triển khai mới](w05-be2-integration.md) cho bộ lọc ngày/hạng vé/voucher, thống kê toàn sự kiện, phân trang, danh sách job, email outbox và giới hạn xuất nền 100000 dòng. Chạy thêm migration 0004 và 0005.
+Xem [hợp đồng và triển khai mới](w05-be2-integration.md) cho bộ lọc ngày/hạng vé/voucher, thống kê toàn sự kiện, phân trang, danh sách job, email outbox và giới hạn xuất nền 100000 dòng. Bản PR tách riêng chạy migration W05 0006 sau W04 0005; không chạy lại các migration nhánh cũ.
