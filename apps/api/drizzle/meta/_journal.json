@@ -22,6 +22,13 @@
       "when": 1793034892821,
       "tag": "0002_w03-search-trigger-index",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793926304526,
+      "tag": "0003_rare_vivisector",
+      "breakpoints": true
     }
   ]
 }

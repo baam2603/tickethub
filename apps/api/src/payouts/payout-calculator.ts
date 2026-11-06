@@ -24,10 +24,7 @@ export function calculatePayout(
   const safeRefundDeduction = Math.max(0, Math.round(refundDeduction));
 
   // Doanh thu thuc giu lai cua su kien sau khi tru tien hoan
-  const retainedRevenue = Math.max(
-    0,
-    safeGrossRevenue - safeRefundDeduction,
-  );
+  const retainedRevenue = Math.max(0, safeGrossRevenue - safeRefundDeduction);
 
   // Phi san tinh tren doanh thu thuc giu
   const platformFee = Math.round(retainedRevenue * platformFeeRate);
@@ -36,10 +33,7 @@ export function calculatePayout(
   const gatewayFee = Math.round(safeGrossRevenue * gatewayFeeRate);
 
   // Thuc nhan ban to chuc (khong bao gio am)
-  const netPayout = Math.max(
-    0,
-    retainedRevenue - platformFee - gatewayFee,
-  );
+  const netPayout = Math.max(0, retainedRevenue - platformFee - gatewayFee);
 
   return {
     grossRevenue: safeGrossRevenue,

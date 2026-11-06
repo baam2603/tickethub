@@ -359,7 +359,10 @@ export class PayoutsService {
       })
       .from(payouts)
       .innerJoin(events, eq(payouts.eventId, events.id))
-      .innerJoin(organizerProfiles, eq(payouts.organizerId, organizerProfiles.id))
+      .innerJoin(
+        organizerProfiles,
+        eq(payouts.organizerId, organizerProfiles.id),
+      )
       .where(whereClause)
       .orderBy(desc(payouts.createdAt))
       .limit(limit)
@@ -379,10 +382,7 @@ export class PayoutsService {
   /**
    * Danh sach quyet toan danh cho Ban to chuc
    */
-  async getOrganizerPayouts(
-    userId: string,
-    query: OrganizerPayoutQueryDto,
-  ) {
+  async getOrganizerPayouts(userId: string, query: OrganizerPayoutQueryDto) {
     const profile = await db.query.organizerProfiles.findFirst({
       where: eq(organizerProfiles.userId, userId),
     });

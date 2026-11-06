@@ -96,7 +96,9 @@ export class ReconciliationsService {
           .orderBy(desc(transactions.createdAt));
 
     // 3. Lay danh sach hoan ve
-    const refundConditions = [inArray(refunds.status, ["PENDING", "COMPLETED"])];
+    const refundConditions = [
+      inArray(refunds.status, ["PENDING", "COMPLETED"]),
+    ];
     if (query.eventId) {
       refundConditions.push(inArray(refunds.orderId, orderIds));
     }
@@ -118,7 +120,7 @@ export class ReconciliationsService {
     }
 
     // Map transactions theo orderId
-    const txByOrderId = new Map<string, typeof allTransactions[0]>();
+    const txByOrderId = new Map<string, (typeof allTransactions)[0]>();
     const matchedTxIds = new Set<string>();
 
     for (const tx of allTransactions) {
@@ -144,7 +146,8 @@ export class ReconciliationsService {
       }
 
       const orderAmount = Number(order.finalAmount || 0);
-      const paidAmount = tx && tx.status === "SUCCESS" ? Number(tx.amount || 0) : 0;
+      const paidAmount =
+        tx && tx.status === "SUCCESS" ? Number(tx.amount || 0) : 0;
       const refundedAmount = refundMap.get(order.id) ?? 0;
 
       let status: ReconciliationStatus;

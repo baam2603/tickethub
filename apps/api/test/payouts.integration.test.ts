@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ConflictException, BadRequestException, ForbiddenException } from "@nestjs/common";
+import {
+  ConflictException,
+  BadRequestException,
+  ForbiddenException,
+} from "@nestjs/common";
 import { AdminPayoutsController } from "../src/payouts/admin-payouts.controller";
 import { OrganizerPayoutsController } from "../src/payouts/organizer-payouts.controller";
 import { PayoutsService } from "../src/payouts/payouts.service";
@@ -199,7 +203,10 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
       if (payout.status === PayoutStatus.PAID_OUT) {
         throw new ConflictException("PAYOUT_ALREADY_PAID_OUT");
       }
-      return await mockPayoutsService.generatePayout(payout.eventId, adminUserId);
+      return await mockPayoutsService.generatePayout(
+        payout.eventId,
+        adminUserId,
+      );
     },
 
     getAdminPayouts: async () => ({
@@ -233,7 +240,10 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
 
   // Mock ReconciliationsService
   const mockReconciliationsService = {
-    getReconciliations: async (query: { eventId?: string; status?: string }) => {
+    getReconciliations: async (query: {
+      eventId?: string;
+      status?: string;
+    }) => {
       let items = [
         {
           orderId: "ord-1",
@@ -380,10 +390,7 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
   });
 
   it("3. Recalculates payout while in HOLD status", async () => {
-    const res = await adminController.recalculatePayout(
-      payoutUuid,
-      adminUser,
-    );
+    const res = await adminController.recalculatePayout(payoutUuid, adminUser);
 
     assert.equal(res.success, true);
     assert.equal(res.data.netPayout, "91600000");
@@ -413,11 +420,7 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
   it("5. Rejects double approval on already PAID_OUT payout with 409 Conflict", async () => {
     await assert.rejects(
       async () => {
-        await adminController.approvePayout(
-          payoutUuid,
-          adminUser,
-          mockRequest,
-        );
+        await adminController.approvePayout(payoutUuid, adminUser, mockRequest);
       },
       (err: unknown) => {
         return (
@@ -495,7 +498,8 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
     assert.equal(resEvent.success, true);
     // Should NOT have orphan transactions attached from other events
     const hasOrphan = resEvent.data.items.some(
-      (item) => item.reconciliationStatus === ReconciliationStatus.ORPHAN_TRANSACTION,
+      (item) =>
+        item.reconciliationStatus === ReconciliationStatus.ORPHAN_TRANSACTION,
     );
     assert.equal(hasOrphan, false);
   });

@@ -2,10 +2,7 @@ import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { VenuesService } from "../src/venues/venues.service";
 import type Redis from "ioredis";
-import type {
-  UpdateVenueDto,
-  CreateVenueLayoutDto,
-} from "@tickethub/shared";
+import type { UpdateVenueDto, CreateVenueLayoutDto } from "@tickethub/shared";
 
 describe("VenuesService Unit Tests", () => {
   let mockRedis: {

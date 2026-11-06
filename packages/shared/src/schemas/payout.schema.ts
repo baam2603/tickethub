@@ -56,7 +56,9 @@ export const OrganizerPayoutQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 
-export type OrganizerPayoutQueryDto = z.infer<typeof OrganizerPayoutQuerySchema>;
+export type OrganizerPayoutQueryDto = z.infer<
+  typeof OrganizerPayoutQuerySchema
+>;
 
 export const ApprovePayoutResponseSchema = z.object({
   id: z.string().uuid(),
@@ -69,4 +71,3 @@ export const ApprovePayoutResponseSchema = z.object({
 export type ApprovePayoutResponseDto = z.infer<
   typeof ApprovePayoutResponseSchema
 >;
-
