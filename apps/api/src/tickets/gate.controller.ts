@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  Inject,
   Controller,
   HttpCode,
   HttpStatus,
@@ -25,7 +26,9 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.GATE_STAFF, UserRole.ADMIN)
 export class GateController {
-  constructor(private readonly ticketsService: TicketsService) {}
+  constructor(
+    @Inject(TicketsService) private readonly ticketsService: TicketsService,
+  ) {}
 
   @Post("scan")
   @HttpCode(HttpStatus.OK)

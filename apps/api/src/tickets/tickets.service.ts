@@ -3,12 +3,14 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  HttpException,
   NotFoundException,
 } from "@nestjs/common";
 import { and, eq, inArray, count, asc } from "drizzle-orm";
 import { db } from "../database/db";
 import {
   auditLog,
+  gateCheckinLogs,
   events,
   eventStaff,
   gates,
@@ -115,333 +117,235 @@ export class TicketsService {
     staffRole: string,
     dto: GateScanRequest,
   ): Promise<GateScanResponse> {
-    const payload = this.ed25519Service.verifyDynamicQr(dto.qrToken);
-
-    // 1. Kiểm tra phân công nhân viên nếu không phải ADMIN
-    if (staffRole !== UserRole.ADMIN) {
-      const [assignment] = await db
-        .select({ id: eventStaff.id })
-        .from(eventStaff)
-        .where(
-          and(
-            eq(eventStaff.eventId, payload.eventId),
-            eq(eventStaff.userId, staffUserId),
-          ),
-        )
-        .limit(1);
-
-      if (!assignment) {
-        throw new ForbiddenException(
-          "STAFF_NOT_ASSIGNED_TO_EVENT: Gate staff is not assigned to this event",
-        );
-      }
+    let payload: ReturnType<Ed25519Service["verifyDynamicQr"]>;
+    try {
+      payload = this.ed25519Service.verifyDynamicQr(dto.qrToken);
+    } catch (error) {
+      await db.insert(gateCheckinLogs).values({
+        staffId: staffUserId,
+        method: "QR",
+        outcome: "REJECTED",
+        errorCode: "INVALID_QR",
+      });
+      throw error;
     }
-
-    // 2. Kiểm tra trạng thái sự kiện (Kill Switch)
-    const [event] = await db
-      .select({ id: events.id, status: events.status, title: events.title })
-      .from(events)
-      .where(eq(events.id, payload.eventId))
-      .limit(1);
-
-    if (!event || event.status !== EventStatus.PUBLISHED) {
-      throw new BadRequestException(
-        `EVENT_NOT_ACTIVE: Event is not published or is suspended`,
-      );
-    }
-
-    // 3. Kiểm tra gateId hợp lệ nếu có truyền
-    if (dto.gateId) {
-      const [gate] = await db
-        .select({ id: gates.id })
-        .from(gates)
-        .where(
-          and(eq(gates.id, dto.gateId), eq(gates.eventId, payload.eventId)),
-        )
-        .limit(1);
-
-      if (!gate) {
-        throw new BadRequestException(
-          "INVALID_GATE_ID: Gate does not belong to this event",
-        );
-      }
-    }
-
-    // 4. Cập nhật nguyên tử trạng thái vé
-    const now = new Date();
-    const [updatedTicket] = await db
-      .update(tickets)
-      .set({
-        status: TicketStatus.CHECKED_IN,
-        checkedInAt: now,
-        checkedInBy: staffUserId,
-        gateId: dto.gateId ?? null,
-        updatedAt: now,
-      })
-      .where(
-        and(eq(tickets.id, payload.sub), eq(tickets.status, TicketStatus.SOLD)),
-      )
-      .returning();
-
-    // 5. Nếu không cập nhật được dòng nào -> phân tích nguyên nhân lỗi
-    if (!updatedTicket) {
-      const [existing] = await db
-        .select({
-          id: tickets.id,
-          status: tickets.status,
-          checkedInAt: tickets.checkedInAt,
-          checkedInBy: tickets.checkedInBy,
-          gateId: tickets.gateId,
-        })
-        .from(tickets)
-        .where(eq(tickets.id, payload.sub))
-        .limit(1);
-
-      if (!existing) {
-        throw new NotFoundException("TICKET_NOT_FOUND");
-      }
-
-      if (existing.status === TicketStatus.CHECKED_IN) {
-        throw new ConflictException(
-          `TICKET_ALREADY_USED: Ticket was already checked in at ${existing.checkedInAt?.toISOString()} by staff ${existing.checkedInBy}`,
-        );
-      }
-
-      throw new BadRequestException(
-        `TICKET_NOT_ELIGIBLE: Ticket status is ${existing.status}`,
-      );
-    }
-
-    // 6. Nạp thông tin chi tiết vé và người mua
-    const [ticketInfo] = await db
-      .select({
-        ticketCode: tickets.ticketCode,
-        ticketTypeName: ticketTypes.name,
-        isSeated: ticketTypes.isSeated,
-        zoneName: seats.zoneName,
-        rowLabel: seats.rowLabel,
-        seatNumber: seats.seatNumber,
-        buyerName: users.fullName,
-      })
-      .from(tickets)
-      .innerJoin(ticketTypes, eq(tickets.ticketTypeId, ticketTypes.id))
-      .innerJoin(users, eq(tickets.userId, users.id))
-      .leftJoin(seats, eq(tickets.seatId, seats.id))
-      .where(eq(tickets.id, updatedTicket.id))
-      .limit(1);
-
-    const seatLabel =
-      ticketInfo?.isSeated && ticketInfo?.seatNumber
-        ? `Hàng ${ticketInfo.rowLabel || ""} - Ghế ${ticketInfo.seatNumber}`.trim()
-        : "GA - Fanzone (Vé đứng)";
-
-    return {
-      ticketId: updatedTicket.id,
-      ticketCode: updatedTicket.ticketCode,
-      status: updatedTicket.status,
-      eventTitle: event.title,
-      ticketTypeName: ticketInfo?.ticketTypeName || "",
-      zoneName: ticketInfo?.zoneName ?? undefined,
-      seatLabel,
-      isSeated: ticketInfo?.isSeated ?? false,
-      buyerName: ticketInfo?.buyerName || "",
-      checkedInAt: updatedTicket.checkedInAt!.toISOString(),
-      gateId: updatedTicket.gateId ?? undefined,
-      staffId: staffUserId,
-    };
+    return this.checkIn(staffUserId, staffRole, {
+      eventId: payload.eventId,
+      gateId: dto.gateId,
+      manual: undefined,
+      qr: payload,
+    });
   }
 
-  /**
-   * Tra cứu vé thủ công dự phòng khi khách gặp sự cố thiết bị
-   */
   async lookupTicket(
     staffUserId: string,
     staffRole: string,
     dto: GateLookupRequest,
   ): Promise<GateLookupResponse> {
-    // 1. Kiểm tra phân công nhân viên nếu không phải ADMIN
-    if (staffRole !== UserRole.ADMIN) {
-      const [assignment] = await db
-        .select({ id: eventStaff.id })
-        .from(eventStaff)
-        .where(
-          and(
-            eq(eventStaff.eventId, dto.eventId),
-            eq(eventStaff.userId, staffUserId),
-          ),
-        )
-        .limit(1);
-
-      if (!assignment) {
-        throw new ForbiddenException(
-          "STAFF_NOT_ASSIGNED_TO_EVENT: Gate staff is not assigned to this event",
-        );
-      }
-    }
-
-    // 2. Kiểm tra trạng thái sự kiện
-    const [event] = await db
-      .select({ id: events.id, status: events.status, title: events.title })
-      .from(events)
-      .where(eq(events.id, dto.eventId))
-      .limit(1);
-
-    if (!event || event.status !== EventStatus.PUBLISHED) {
-      throw new BadRequestException(
-        `EVENT_NOT_ACTIVE: Event is not published or is suspended`,
-      );
-    }
-
-    // 3. Kiểm tra gateId hợp lệ nếu có
-    if (dto.gateId) {
-      const [gate] = await db
-        .select({ id: gates.id })
-        .from(gates)
-        .where(and(eq(gates.id, dto.gateId), eq(gates.eventId, dto.eventId)))
-        .limit(1);
-
-      if (!gate) {
-        throw new BadRequestException(
-          "INVALID_GATE_ID: Gate does not belong to this event",
-        );
-      }
-    }
-
-    // 4. Tìm kiếm vé theo ticketCode và eventId
-    const [ticketRow] = await db
-      .select({
-        id: tickets.id,
-        userId: tickets.userId,
-        status: tickets.status,
-        ticketCode: tickets.ticketCode,
-        buyerPhone: users.phone,
-        buyerEmail: users.email,
-        buyerName: users.fullName,
-        ticketTypeName: ticketTypes.name,
-        isSeated: ticketTypes.isSeated,
-        zoneName: seats.zoneName,
-        rowLabel: seats.rowLabel,
-        seatNumber: seats.seatNumber,
-      })
-      .from(tickets)
-      .innerJoin(ticketTypes, eq(tickets.ticketTypeId, ticketTypes.id))
-      .innerJoin(users, eq(tickets.userId, users.id))
-      .leftJoin(seats, eq(tickets.seatId, seats.id))
-      .where(
-        and(
-          eq(tickets.ticketCode, dto.ticketCode),
-          eq(tickets.eventId, dto.eventId),
-        ),
-      )
-      .limit(1);
-
-    if (!ticketRow) {
-      throw new NotFoundException(
-        "TICKET_NOT_FOUND: Invalid ticket code for this event",
-      );
-    }
-
-    if (ticketRow.status === TicketStatus.CHECKED_IN) {
-      throw new ConflictException(
-        "TICKET_ALREADY_USED: Ticket has already been used",
-      );
-    }
-
-    if (ticketRow.status !== TicketStatus.SOLD) {
-      throw new BadRequestException(
-        `TICKET_NOT_ELIGIBLE: Ticket status is ${ticketRow.status}`,
-      );
-    }
-
-    // 5. Đối soát 4 số cuối SĐT hoặc Email
-    const last4Input = dto.phoneOrEmailLast4.trim().toLowerCase();
-    let isMatch = false;
-
-    if (ticketRow.buyerPhone) {
-      const cleanPhone = ticketRow.buyerPhone.replace(/\D/g, "");
-      if (cleanPhone.slice(-4) === last4Input) {
-        isMatch = true;
-      }
-    }
-
-    if (!isMatch && ticketRow.buyerEmail) {
-      const emailLower = ticketRow.buyerEmail.toLowerCase();
-      const emailLocalPart = emailLower.split("@")[0] || "";
-      if (
-        emailLocalPart.slice(-4) === last4Input ||
-        emailLower.slice(-4) === last4Input
-      ) {
-        isMatch = true;
-      }
-    }
-
-    if (!isMatch) {
-      throw new BadRequestException(
-        "VERIFICATION_FAILED: Phone or email last 4 digits do not match",
-      );
-    }
-
-    // 6. Cập nhật nguyên tử
-    const now = new Date();
-    const [updatedTicket] = await db
-      .update(tickets)
-      .set({
-        status: TicketStatus.CHECKED_IN,
-        checkedInAt: now,
-        checkedInBy: staffUserId,
-        gateId: dto.gateId ?? null,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(tickets.id, ticketRow.id),
-          eq(tickets.status, TicketStatus.SOLD),
-        ),
-      )
-      .returning();
-
-    if (!updatedTicket) {
-      throw new ConflictException(
-        "TICKET_ALREADY_USED: Ticket has already been checked in",
-      );
-    }
-
-    // 7. Ghi vết kiểm toán bắt buộc vào audit_log
-    await db.insert(auditLog).values({
-      actorId: staffUserId,
-      actorRole: staffRole,
-      action: "MANUAL_TICKET_CHECK_IN",
-      targetType: "TICKET",
-      targetId: ticketRow.id,
-      changes: {
-        ticketCode: dto.ticketCode,
-        reason: dto.reason,
-        phoneOrEmailLast4: dto.phoneOrEmailLast4,
-        gateId: dto.gateId ?? null,
-        timestamp: now.toISOString(),
-      },
+    const result = await this.checkIn(staffUserId, staffRole, {
+      eventId: dto.eventId,
+      gateId: dto.gateId,
+      manual: dto,
+      qr: undefined,
     });
+    return { ...result, method: "MANUAL_LOOKUP" };
+  }
 
-    const seatLabel =
-      ticketRow.isSeated && ticketRow.seatNumber
-        ? `Hàng ${ticketRow.rowLabel || ""} - Ghế ${ticketRow.seatNumber}`.trim()
-        : "GA - Fanzone (Vé đứng)";
-
-    return {
-      ticketId: updatedTicket.id,
-      ticketCode: updatedTicket.ticketCode,
-      status: updatedTicket.status,
-      eventTitle: event.title,
-      ticketTypeName: ticketRow.ticketTypeName,
-      zoneName: ticketRow.zoneName ?? undefined,
-      seatLabel,
-      isSeated: ticketRow.isSeated,
-      buyerName: ticketRow.buyerName,
-      checkedInAt: updatedTicket.checkedInAt!.toISOString(),
-      gateId: updatedTicket.gateId ?? undefined,
-      staffId: staffUserId,
-      method: "MANUAL_LOOKUP",
-    };
+  private async checkIn(
+    staffUserId: string,
+    staffRole: string,
+    input: {
+      eventId: string;
+      gateId: string | undefined;
+      manual: GateLookupRequest | undefined;
+      qr: ReturnType<Ed25519Service["verifyDynamicQr"]> | undefined;
+    },
+  ): Promise<GateScanResponse> {
+    const method = input.manual ? "MANUAL" : "QR";
+    let resolvedGate: string | null = null;
+    let foundTicket: string | null = null;
+    try {
+      return await db.transaction(async (tx) => {
+        const [actor] = await tx
+          .select()
+          .from(users)
+          .where(eq(users.id, staffUserId))
+          .for("share");
+        if (
+          !actor ||
+          actor.status !== "ACTIVE" ||
+          actor.role !== staffRole ||
+          ![UserRole.GATE_STAFF, UserRole.ADMIN].some((r) => r === actor.role)
+        )
+          throw new ForbiddenException("STAFF_INACTIVE");
+        let assignedGate: string | null = null;
+        if (staffRole !== UserRole.ADMIN) {
+          const [assignment] = await tx
+            .select()
+            .from(eventStaff)
+            .where(
+              and(
+                eq(eventStaff.eventId, input.eventId),
+                eq(eventStaff.userId, staffUserId),
+              ),
+            )
+            .for("share");
+          if (!assignment)
+            throw new ForbiddenException("STAFF_NOT_ASSIGNED_TO_EVENT");
+          assignedGate = assignment.gateId;
+          if (assignedGate && input.gateId && input.gateId !== assignedGate)
+            throw new ForbiddenException("STAFF_NOT_ASSIGNED_TO_GATE");
+        }
+        const [event] = await tx
+          .select()
+          .from(events)
+          .where(eq(events.id, input.eventId))
+          .for("share");
+        if (!event || event.status !== EventStatus.PUBLISHED)
+          throw new BadRequestException("EVENT_NOT_ACTIVE");
+        resolvedGate = input.gateId ?? assignedGate;
+        if (resolvedGate) {
+          const gate = await tx.query.gates.findFirst({
+            where: and(
+              eq(gates.id, resolvedGate),
+              eq(gates.eventId, input.eventId),
+            ),
+          });
+          if (!gate) {
+            resolvedGate = null;
+            throw new BadRequestException("INVALID_GATE_ID");
+          }
+        }
+        const [info] = await tx
+          .select({
+            ticket: tickets,
+            buyer: users,
+            type: ticketTypes,
+            seat: seats,
+          })
+          .from(tickets)
+          .innerJoin(users, eq(users.id, tickets.userId))
+          .innerJoin(ticketTypes, eq(ticketTypes.id, tickets.ticketTypeId))
+          .leftJoin(seats, eq(seats.id, tickets.seatId))
+          .where(
+            and(
+              eq(tickets.eventId, input.eventId),
+              input.manual
+                ? eq(tickets.ticketCode, input.manual.ticketCode)
+                : eq(tickets.id, input.qr!.sub),
+            ),
+          )
+          .limit(1);
+        if (!info) throw new NotFoundException("TICKET_NOT_FOUND");
+        foundTicket = info.ticket.id;
+        if (
+          input.qr &&
+          (info.ticket.orderId !== input.qr.orderId ||
+            info.ticket.userId !== input.qr.userId)
+        )
+          throw new BadRequestException("QR_TICKET_MISMATCH");
+        if (info.ticket.status === TicketStatus.CHECKED_IN)
+          throw new ConflictException(
+            `TICKET_ALREADY_USED: Ticket was already checked in at ${info.ticket.checkedInAt?.toISOString()} by staff ${info.ticket.checkedInBy}`,
+          );
+        if (info.ticket.status !== TicketStatus.SOLD)
+          throw new BadRequestException("TICKET_NOT_ELIGIBLE");
+        if (input.manual) {
+          const last4 = input.manual.phoneOrEmailLast4?.trim();
+          const phoneMatch = Boolean(
+            last4 &&
+            /^\d{4}$/.test(last4) &&
+            info.buyer.phone?.replace(/\D/g, "").slice(-4) === last4,
+          );
+          const emailMatch = Boolean(
+            input.manual.email &&
+            info.buyer.email.toLowerCase() ===
+              input.manual.email.trim().toLowerCase(),
+          );
+          if (!phoneMatch && !emailMatch)
+            throw new BadRequestException("VERIFICATION_FAILED");
+        }
+        if (!resolvedGate) throw new BadRequestException("GATE_REQUIRED");
+        const now = new Date();
+        const [updated] = await tx
+          .update(tickets)
+          .set({
+            status: TicketStatus.CHECKED_IN,
+            checkedInAt: now,
+            checkedInBy: staffUserId,
+            gateId: resolvedGate,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(tickets.id, info.ticket.id),
+              eq(tickets.eventId, input.eventId),
+              eq(tickets.status, TicketStatus.SOLD),
+            ),
+          )
+          .returning();
+        if (!updated) throw new ConflictException("TICKET_ALREADY_USED");
+        const reason = input.manual?.reason ?? null;
+        await tx.insert(gateCheckinLogs).values({
+          eventId: input.eventId,
+          ticketId: updated.id,
+          gateId: resolvedGate,
+          staffId: staffUserId,
+          method,
+          outcome: "SUCCESS",
+          reason,
+          checkedInAt: now,
+        });
+        await tx.insert(auditLog).values({
+          actorId: staffUserId,
+          actorRole: staffRole,
+          action: input.manual
+            ? "MANUAL_TICKET_CHECK_IN"
+            : "QR_TICKET_CHECK_IN",
+          targetType: "TICKET",
+          targetId: updated.id,
+          changes: {
+            eventId: input.eventId,
+            gateId: resolvedGate,
+            staffId: staffUserId,
+            reason,
+            checkedInAt: now.toISOString(),
+            method,
+          },
+        });
+        return {
+          ticketId: updated.id,
+          ticketCode: updated.ticketCode,
+          status: updated.status,
+          eventTitle: event.title,
+          ticketTypeName: info.type.name,
+          zoneName: info.seat?.zoneName ?? undefined,
+          seatLabel:
+            info.type.isSeated && info.seat
+              ? `Hàng ${info.seat.rowLabel} - Ghế ${info.seat.seatNumber}`
+              : "GA - Fanzone (Vé đứng)",
+          isSeated: info.type.isSeated,
+          buyerName: info.buyer.fullName,
+          checkedInAt: now.toISOString(),
+          gateId: resolvedGate,
+          staffId: staffUserId,
+        };
+      });
+    } catch (error) {
+      const message =
+        error instanceof HttpException ? error.message : "CHECKIN_FAILED";
+      await db.insert(gateCheckinLogs).values({
+        eventId: input.eventId,
+        ticketId: foundTicket,
+        gateId: resolvedGate,
+        staffId: staffUserId,
+        method,
+        outcome: "REJECTED",
+        reason: input.manual?.reason ?? null,
+        errorCode: message.split(":")[0]!.slice(0, 100),
+      });
+      throw error;
+    }
   }
 
   /**
