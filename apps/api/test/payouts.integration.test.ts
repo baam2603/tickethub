@@ -233,8 +233,8 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
 
   // Mock ReconciliationsService
   const mockReconciliationsService = {
-    getReconciliations: async (query: { status?: string }) => {
-      const items = [
+    getReconciliations: async (query: { eventId?: string; status?: string }) => {
+      let items = [
         {
           orderId: "ord-1",
           orderCode: "ORD-001",
@@ -277,7 +277,11 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
           payDate: null,
           reconciliationStatus: ReconciliationStatus.MISSING_TRANSACTION,
         },
-        {
+      ];
+
+      // Chi them orphan transaction khi doi soat toan he thong (khong loc theo eventId)
+      if (!query.eventId) {
+        items.push({
           orderId: null,
           orderCode: null,
           eventId: null,
@@ -290,8 +294,12 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
           bankCode: "VCB",
           payDate: new Date(),
           reconciliationStatus: ReconciliationStatus.ORPHAN_TRANSACTION,
-        },
-      ];
+        });
+      }
+
+      if (query.eventId) {
+        items = items.filter((i) => i.eventId === query.eventId);
+      }
 
       const filtered =
         query.status && query.status !== "ALL"
@@ -301,11 +309,15 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
       return {
         summary: {
           totalTransactions: items.length,
-          totalOrderAmount: 4500000,
-          totalPaidAmount: 3800000,
+          totalOrderAmount: items.reduce((sum, i) => sum + i.orderAmount, 0),
+          totalPaidAmount: items.reduce((sum, i) => sum + i.paidAmount, 0),
           totalRefundedAmount: 0,
-          matchedCount: 1,
-          mismatchedCount: 3,
+          matchedCount: items.filter(
+            (i) => i.reconciliationStatus === ReconciliationStatus.MATCHED,
+          ).length,
+          mismatchedCount: items.filter(
+            (i) => i.reconciliationStatus !== ReconciliationStatus.MATCHED,
+          ).length,
         },
         items: filtered,
         meta: {
@@ -472,5 +484,19 @@ describe("Reconciliations & Payouts Integration Test Suite", () => {
         );
       },
     );
+  });
+
+  it("8. Reconciliations filtering by eventId does NOT treat transactions from other events as orphan transactions", async () => {
+    // When filtering by specific eventId, only transactions of that event should be evaluated
+    const resEvent = await adminController.getReconciliations({
+      eventId: "e0000000-0000-4000-a000-000000000001",
+    });
+
+    assert.equal(resEvent.success, true);
+    // Should NOT have orphan transactions attached from other events
+    const hasOrphan = resEvent.data.items.some(
+      (item) => item.reconciliationStatus === ReconciliationStatus.ORPHAN_TRANSACTION,
+    );
+    assert.equal(hasOrphan, false);
   });
 });

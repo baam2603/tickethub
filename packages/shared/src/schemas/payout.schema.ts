@@ -57,3 +57,16 @@ export const OrganizerPayoutQuerySchema = z.object({
 });
 
 export type OrganizerPayoutQueryDto = z.infer<typeof OrganizerPayoutQuerySchema>;
+
+export const ApprovePayoutResponseSchema = z.object({
+  id: z.string().uuid(),
+  status: z.literal("PAID_OUT"),
+  approvedBy: z.string().uuid(),
+  paidOutAt: z.string(),
+  message: z.string(),
+});
+
+export type ApprovePayoutResponseDto = z.infer<
+  typeof ApprovePayoutResponseSchema
+>;
+

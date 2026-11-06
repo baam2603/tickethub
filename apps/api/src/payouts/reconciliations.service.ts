@@ -52,14 +52,55 @@ export class ReconciliationsService {
       .where(orderConditions.length > 0 ? and(...orderConditions) : undefined)
       .orderBy(desc(orders.createdAt));
 
-    // 2. Lay tat ca cac giao dich VNPay
-    const allTransactions = await db
-      .select()
-      .from(transactions)
-      .where(eq(transactions.provider, "VNPAY"))
-      .orderBy(desc(transactions.createdAt));
+    const orderIds = allOrders.map((o) => o.id);
 
-    // 3. Lay tat ca cac hoan ve thanh cong hoac dang cho
+    // 2. Lay danh sach giao dich can doi soat
+    // Neu co eventId ma su kien chua co don hang nao thi tra ve ket qua rong ngay
+    if (query.eventId && orderIds.length === 0) {
+      return {
+        summary: {
+          totalTransactions: 0,
+          totalOrderAmount: 0,
+          totalPaidAmount: 0,
+          totalRefundedAmount: 0,
+          matchedCount: 0,
+          mismatchedCount: 0,
+        },
+        items: [],
+        meta: {
+          total: 0,
+          page,
+          limit,
+          totalPages: 1,
+        },
+      };
+    }
+
+    // Khi loc theo eventId, chi lay giao dich thuoc cac don hang cua su kien do.
+    // Khi khong loc theo eventId (doi soat toan he thong), lay tat ca giao dich VNPay.
+    const allTransactions = query.eventId
+      ? await db
+          .select()
+          .from(transactions)
+          .where(
+            and(
+              eq(transactions.provider, "VNPAY"),
+              inArray(transactions.orderId, orderIds),
+            ),
+          )
+          .orderBy(desc(transactions.createdAt))
+      : await db
+          .select()
+          .from(transactions)
+          .where(eq(transactions.provider, "VNPAY"))
+          .orderBy(desc(transactions.createdAt));
+
+    // 3. Lay danh sach hoan ve
+    const refundConditions = [inArray(refunds.status, ["PENDING", "COMPLETED"])];
+    if (query.eventId) {
+      refundConditions.push(inArray(refunds.orderId, orderIds));
+    }
+
     const allRefunds = await db
       .select({
         orderId: refunds.orderId,
@@ -67,7 +108,7 @@ export class ReconciliationsService {
         status: refunds.status,
       })
       .from(refunds)
-      .where(inArray(refunds.status, ["PENDING", "COMPLETED"]));
+      .where(and(...refundConditions));
 
     // Map refunds theo orderId
     const refundMap = new Map<string, number>();
@@ -93,7 +134,6 @@ export class ReconciliationsService {
 
     // Xet tung order
     for (const order of allOrders) {
-      // Chi xet nhung don da PAID, REFUNDED hoac co transaction ghi nhan
       const tx = txByOrderId.get(order.id);
       if (tx) {
         matchedTxIds.add(tx.id);
@@ -132,23 +172,25 @@ export class ReconciliationsService {
       });
     }
 
-    // Xet cac giao dich mo coi (Orphan transactions - khong tim thay order hop le)
-    for (const tx of allTransactions) {
-      if (!matchedTxIds.has(tx.id) && tx.status === "SUCCESS") {
-        items.push({
-          orderId: tx.orderId ?? null,
-          orderCode: null,
-          eventId: null,
-          eventTitle: null,
-          orderAmount: 0,
-          paidAmount: Number(tx.amount || 0),
-          refundedAmount: 0,
-          transactionRef: tx.transactionRef,
-          providerTxNumber: tx.providerTxNumber ?? null,
-          bankCode: tx.bankCode ?? null,
-          payDate: tx.payDate ?? null,
-          reconciliationStatus: ReconciliationStatus.ORPHAN_TRANSACTION,
-        });
+    // Chi xet cac giao dich mo coi (Orphan transactions) khi doi soat toan he thong (khong loc theo eventId cu the)
+    if (!query.eventId) {
+      for (const tx of allTransactions) {
+        if (!matchedTxIds.has(tx.id) && tx.status === "SUCCESS") {
+          items.push({
+            orderId: tx.orderId ?? null,
+            orderCode: null,
+            eventId: null,
+            eventTitle: null,
+            orderAmount: 0,
+            paidAmount: Number(tx.amount || 0),
+            refundedAmount: 0,
+            transactionRef: tx.transactionRef,
+            providerTxNumber: tx.providerTxNumber ?? null,
+            bankCode: tx.bankCode ?? null,
+            payDate: tx.payDate ?? null,
+            reconciliationStatus: ReconciliationStatus.ORPHAN_TRANSACTION,
+          });
+        }
       }
     }
 
@@ -158,7 +200,7 @@ export class ReconciliationsService {
         ? items.filter((item) => item.reconciliationStatus === query.status)
         : items;
 
-    // Tinh toan summary tren toan bo danh sach items
+    // Tinh toan summary tren toan bo danh sach items cua pham vi doi soat nay
     const summary = {
       totalTransactions: items.length,
       totalOrderAmount: items.reduce((sum, i) => sum + i.orderAmount, 0),

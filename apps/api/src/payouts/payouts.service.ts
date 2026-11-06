@@ -5,7 +5,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from "@nestjs/common";
-import { and, eq, inArray, sql, desc, count } from "drizzle-orm";
+import { and, eq, inArray, ne, sql, desc, count } from "drizzle-orm";
 import { db } from "../database/db";
 import { payouts } from "../database/schema/payouts";
 import { events } from "../database/schema/events";
@@ -107,7 +107,14 @@ export class PayoutsService {
         .where(eq(payouts.id, existingPayout.id))
         .returning();
 
-      return updated;
+      return {
+        ...updated,
+        totalRevenue: Number(updated?.totalRevenue),
+        platformFee: Number(updated?.platformFee),
+        gatewayFee: Number(updated?.gatewayFee),
+        refundDeduction: Number(updated?.refundDeduction),
+        netPayout: Number(updated?.netPayout),
+      };
     }
 
     // Tao moi lenh quyet toan
@@ -125,11 +132,18 @@ export class PayoutsService {
       })
       .returning();
 
-    return created;
+    return {
+      ...created,
+      totalRevenue: Number(created?.totalRevenue),
+      platformFee: Number(created?.platformFee),
+      gatewayFee: Number(created?.gatewayFee),
+      refundDeduction: Number(created?.refundDeduction),
+      netPayout: Number(created?.netPayout),
+    };
   }
 
   /**
-   * Phe duyet lenh chi tra va ghi audit log
+   * Phe duyet lenh chi tra va ghi audit log (cap nhat nguyen tu chong race condition)
    */
   async approvePayout(
     payoutId: string,
@@ -137,26 +151,10 @@ export class PayoutsService {
     ipAddress?: string,
     userAgent?: string,
   ) {
-    const [payout] = await db
-      .select()
-      .from(payouts)
-      .where(eq(payouts.id, payoutId));
-
-    if (!payout) {
-      throw new NotFoundException(
-        "PAYOUT_NOT_FOUND: Không tìm thấy lệnh chi trả",
-      );
-    }
-
-    if (payout.status === PayoutStatus.PAID_OUT) {
-      throw new ConflictException(
-        "PAYOUT_ALREADY_APPROVED: Lệnh chi trả này đã được phê duyệt trước đó",
-      );
-    }
-
     const now = new Date();
 
     return await db.transaction(async (tx) => {
+      // Cap nhat nguyen tu: chi cap nhat neu trang thai chua phai la PAID_OUT
       const [updated] = await tx
         .update(payouts)
         .set({
@@ -165,17 +163,38 @@ export class PayoutsService {
           paidOutAt: now,
           updatedAt: now,
         })
-        .where(eq(payouts.id, payoutId))
+        .where(
+          and(
+            eq(payouts.id, payoutId),
+            ne(payouts.status, PayoutStatus.PAID_OUT),
+          ),
+        )
         .returning();
+
+      if (!updated) {
+        const [existing] = await tx
+          .select({ status: payouts.status })
+          .from(payouts)
+          .where(eq(payouts.id, payoutId));
+
+        if (!existing) {
+          throw new NotFoundException(
+            "PAYOUT_NOT_FOUND: Không tìm thấy lệnh chi trả",
+          );
+        }
+
+        throw new ConflictException(
+          "PAYOUT_ALREADY_APPROVED: Lệnh chi trả này đã được phê duyệt trước đó",
+        );
+      }
 
       await tx.insert(auditLog).values({
         actorId: adminUserId,
         actorRole: UserRole.ADMIN,
         action: "APPROVE_PAYOUT",
         targetType: "PAYOUT",
-        targetId: payout.id,
+        targetId: payoutId,
         changes: {
-          oldStatus: payout.status,
           newStatus: PayoutStatus.PAID_OUT,
           approvedBy: adminUserId,
           paidOutAt: now.toISOString(),
@@ -186,13 +205,18 @@ export class PayoutsService {
 
       return {
         ...updated,
+        totalRevenue: Number(updated.totalRevenue),
+        platformFee: Number(updated.platformFee),
+        gatewayFee: Number(updated.gatewayFee),
+        refundDeduction: Number(updated.refundDeduction),
+        netPayout: Number(updated.netPayout),
         message: "Lệnh chi trả đã được phê duyệt thành công.",
       };
     });
   }
 
   /**
-   * Tam giu lenh chi tra khi co khieu nai hoac tranh chap
+   * Tam giu lenh chi tra khi co khieu nai hoac tranh chap (cap nhat nguyen tu)
    */
   async holdPayout(
     payoutId: string,
@@ -201,23 +225,6 @@ export class PayoutsService {
     ipAddress?: string,
     userAgent?: string,
   ) {
-    const [payout] = await db
-      .select()
-      .from(payouts)
-      .where(eq(payouts.id, payoutId));
-
-    if (!payout) {
-      throw new NotFoundException(
-        "PAYOUT_NOT_FOUND: Không tìm thấy lệnh chi trả",
-      );
-    }
-
-    if (payout.status === PayoutStatus.PAID_OUT) {
-      throw new BadRequestException(
-        "CANNOT_HOLD_PAID_OUT: Không thể tạm giữ lệnh chi trả đã hoàn tất",
-      );
-    }
-
     const now = new Date();
 
     return await db.transaction(async (tx) => {
@@ -228,17 +235,38 @@ export class PayoutsService {
           holdReason: reason,
           updatedAt: now,
         })
-        .where(eq(payouts.id, payoutId))
+        .where(
+          and(
+            eq(payouts.id, payoutId),
+            ne(payouts.status, PayoutStatus.PAID_OUT),
+          ),
+        )
         .returning();
+
+      if (!updated) {
+        const [existing] = await tx
+          .select({ status: payouts.status })
+          .from(payouts)
+          .where(eq(payouts.id, payoutId));
+
+        if (!existing) {
+          throw new NotFoundException(
+            "PAYOUT_NOT_FOUND: Không tìm thấy lệnh chi trả",
+          );
+        }
+
+        throw new BadRequestException(
+          "CANNOT_HOLD_PAID_OUT: Không thể tạm giữ lệnh chi trả đã hoàn tất",
+        );
+      }
 
       await tx.insert(auditLog).values({
         actorId: adminUserId,
         actorRole: UserRole.ADMIN,
         action: "HOLD_PAYOUT",
         targetType: "PAYOUT",
-        targetId: payout.id,
+        targetId: payoutId,
         changes: {
-          oldStatus: payout.status,
           newStatus: PayoutStatus.HOLD,
           holdReason: reason,
         },
@@ -246,7 +274,14 @@ export class PayoutsService {
         userAgent: userAgent ?? null,
       });
 
-      return updated;
+      return {
+        ...updated,
+        totalRevenue: Number(updated.totalRevenue),
+        platformFee: Number(updated.platformFee),
+        gatewayFee: Number(updated.gatewayFee),
+        refundDeduction: Number(updated.refundDeduction),
+        netPayout: Number(updated.netPayout),
+      };
     });
   }
 
