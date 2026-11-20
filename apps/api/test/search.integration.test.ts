@@ -370,6 +370,44 @@ describe("W03-BE2: Event Full-Text Search (UC02) Integration Test Suite", () => 
     });
   });
 
+  describe("3b. Keyword ngan va xep theo do lien quan", () => {
+    it("Keyword 1 ky tu hoac chi dau cau bo full-text, van giu bo loc", async () => {
+      const all = await searchEvents.execute({ city: "Hà Nội", limit: 50 });
+      assert.ok(all.items.some((item) => item.id === event1Id));
+      for (const keyword of ["x", " x ", "!!", "   "]) {
+        const res = await searchEvents.execute({
+          keyword,
+          city: "Hà Nội",
+          limit: 50,
+        });
+        assert.deepEqual(
+          res.items.map((i) => i.id),
+          all.items.map((i) => i.id),
+          `keyword "${keyword}"`,
+        );
+      }
+    });
+
+    it("Phan trang theo keyword khong mat va khong trung ket qua", async () => {
+      const full = await searchEvents.execute({ keyword: "ha noi", limit: 50 });
+      const ids: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await searchEvents.execute({
+          keyword: "ha noi",
+          limit: 1,
+          cursor,
+        });
+        ids.push(...page.items.map((i) => i.id));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      assert.deepEqual(
+        ids,
+        full.items.map((i) => i.id),
+      );
+    });
+  });
+
   describe("4. Validate query & SearchController validation", () => {
     it("Controller tu choi minPrice > maxPrice voi loi VALIDATION_ERROR", async () => {
       await assert.rejects(

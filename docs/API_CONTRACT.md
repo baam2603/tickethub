@@ -1286,7 +1286,9 @@ Ban tổ chức tra cứu danh sách các khoản quyết toán chi trả của 
 
 Tìm kiếm sự kiện có áp dụng giới hạn tốc độ truy vấn (Rate Limit: 30 requests / phút).
 
-- Tham số truy vấn: `keyword`, `city`, `category`, `fromDate`, `toDate`, `page`, `limit`
+- Tham số truy vấn: `keyword`, `city`, `category`, `fromDate`, `toDate`, `minPrice`, `maxPrice`, `cursor`, `limit`
+- Keyword được trim và chuẩn hóa NFC. Keyword dưới 2 ký tự hoặc chỉ gồm dấu câu bỏ điều kiện full-text nhưng vẫn áp dụng các bộ lọc khác.
+- Thứ tự kết quả: khi có keyword hợp lệ, sắp theo độ liên quan giảm dần, sau đó `startTime` và `id` tăng dần; `cursor` (ID sự kiện cuối trang trước) theo cùng thứ tự.
 - Response 200: Danh sách kết quả tìm kiếm kèm thông tin phân trang
 
 ---

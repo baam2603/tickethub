@@ -7,7 +7,7 @@ import type {
 export interface EventSearchRepository {
   /** Tra ve null neu su kien khong ton tai hoac chua PUBLISHED. */
   resolveCursor(eventId: string): Promise<SearchCursor | null>;
-  /** ID su kien khop bo loc, theo thu tu on dinh (startTime, id), toi da `take`. */
+  /** ID su kien khop bo loc, theo thu tu on dinh (startTime, id), hoac (do lien quan giam dan, startTime, id) khi co keyword, toi da `take`. */
   findMatchingIds(
     filters: SearchFilters,
     cursor: SearchCursor | null,

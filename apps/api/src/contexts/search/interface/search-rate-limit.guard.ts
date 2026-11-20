@@ -12,8 +12,8 @@ import Redis from "ioredis";
 import { createHash } from "node:crypto";
 import { REDIS_CLIENT } from "../../../database/redis.module";
 
-// Gioi han 60 yeu cau tim kiem / phut / IP
-const SEARCH_RATE_LIMIT = 60;
+// Gioi han 30 yeu cau tim kiem / phut / IP
+const SEARCH_RATE_LIMIT = 30;
 
 const RATE_LIMIT_SCRIPT = `
   local count = redis.call("INCR", KEYS[1])

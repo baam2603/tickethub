@@ -1,10 +1,12 @@
 import {
   and,
   asc,
+  desc,
   eq,
   gt,
   gte,
   inArray,
+  lt,
   lte,
   or,
   sql,
@@ -19,6 +21,12 @@ import type {
   SearchFilters,
 } from "../domain/search.models";
 import type { EventSearchRepository } from "../domain/search.ports";
+
+/** Keyword duoi 2 ky tu hoac chi co dau cau: bo full-text, van giu cac bo loc. */
+function fullTextKeyword(keyword?: string): string | null {
+  const k = keyword?.trim().normalize("NFC") ?? "";
+  return Array.from(k).length >= 2 && /[\p{L}\p{N}]/u.test(k) ? k : null;
+}
 
 export class DrizzleEventSearchRepository implements EventSearchRepository {
   async resolveCursor(eventId: string): Promise<SearchCursor | null> {
@@ -39,15 +47,11 @@ export class DrizzleEventSearchRepository implements EventSearchRepository {
   ): Promise<string[]> {
     const conditions: SQL[] = [eq(events.status, EventStatus.PUBLISHED)];
 
-    // Tim kiem Full-Text tieng Viet khong dau
-    if (filters.keyword) {
-      conditions.push(
-        sql`${events.searchVector} @@ plainto_tsquery(
-          'simple',
-          unaccent(${filters.keyword})
-        )`,
-      );
-    }
+    // Tim kiem Full-Text tieng Viet khong dau, xep theo do lien quan
+    const keyword = fullTextKeyword(filters.keyword);
+    const query = sql`plainto_tsquery('simple', unaccent(${keyword}))`;
+    const rank = sql`ts_rank(${events.searchVector}, ${query})`;
+    if (keyword) conditions.push(sql`${events.searchVector} @@ ${query}`);
     if (filters.city) {
       conditions.push(
         sql`lower(unaccent(${events.city})) =
@@ -85,10 +89,15 @@ export class DrizzleEventSearchRepository implements EventSearchRepository {
     }
 
     if (cursor) {
-      const nextPage = or(
+      const chronologicalNext = or(
         gt(events.startTime, cursor.startTime),
         and(eq(events.startTime, cursor.startTime), gt(events.id, cursor.id)),
       );
+      // So rank trong SQL de tranh sai lech lam tron float khi di qua JS.
+      const cursorRank = sql`(SELECT ts_rank(c.search_vector, ${query}) FROM events c WHERE c.id = ${cursor.id})`;
+      const nextPage = keyword
+        ? or(lt(rank, cursorRank), and(eq(rank, cursorRank), chronologicalNext))
+        : chronologicalNext;
       if (nextPage) conditions.push(nextPage);
     }
 
@@ -96,7 +105,11 @@ export class DrizzleEventSearchRepository implements EventSearchRepository {
       .select({ id: events.id })
       .from(events)
       .where(and(...conditions))
-      .orderBy(asc(events.startTime), asc(events.id))
+      .orderBy(
+        ...(keyword ? [desc(rank)] : []),
+        asc(events.startTime),
+        asc(events.id),
+      )
       .limit(take);
     return rows.map((r) => r.id);
   }
