@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { expect, test, type APIResponse } from "@playwright/test";
 
@@ -7,6 +11,57 @@ const password = "Password123!";
 async function readData<T>(response: APIResponse, status = 200): Promise<T> {
   expect(response.status(), await response.text()).toBe(status);
   return (await response.json()).data as T;
+}
+
+function prepareClosedEvent(eventId: string, slug: string) {
+  const directory = mkdtempSync(join(tmpdir(), "w06-e2e-"));
+  const csv = join(directory, "report.csv");
+  const apiDirectory = resolve("../api");
+  try {
+    // Move only this test fixture's dates. The actual lifecycle transition uses the Admin API.
+    execFileSync(
+      process.execPath,
+      [
+        "-e",
+        `const { env } = require("./dist/config/env.config.js");
+      const database = new URL(env.DATABASE_URL);
+      if (env.NODE_ENV !== "test" ||
+          !["localhost", "127.0.0.1"].includes(database.hostname) ||
+          !["/tickethub_dev"].includes(database.pathname) && !database.pathname.endsWith("_test"))
+        throw new Error("Expected a local E2E database");
+      const sql = require("postgres").default(env.DATABASE_URL);
+      sql.unsafe("UPDATE events SET start_time = now() - interval '2 days', end_time = now() - interval '1 day', gate_opening_time = now() - interval '3 days' WHERE id = $1 AND slug = $2 AND status = 'PUBLISHED' RETURNING id", process.argv.slice(1))
+        .then(rows => { if (rows.length !== 1) throw new Error("Missing W06 fixture"); })
+        .catch(error => { console.error(error.message); process.exitCode = 1; })
+        .finally(() => sql.end());`,
+        eventId,
+        slug,
+      ],
+      { cwd: apiDirectory, stdio: "pipe" },
+    );
+    writeFileSync(
+      csv,
+      "vnp_TxnRef,vnp_TransactionNo,vnp_Amount,vnp_TransactionType\n",
+    );
+    return {
+      importReport() {
+        execFileSync(
+          process.execPath,
+          ["dist/contexts/payout/vnpay-reconciliation.js", eventId, csv],
+          {
+            cwd: apiDirectory,
+            stdio: "pipe",
+          },
+        );
+      },
+      cleanup() {
+        rmSync(directory, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 test("W06 FE1: kiểm duyệt, đình chỉ, khôi phục và quyết toán qua API thật", async ({
@@ -121,6 +176,23 @@ test("W06 FE1: kiểm duyệt, đình chỉ, khôi phục và quyết toán qua 
   await page.getByRole("textbox", { name: "Mã sự kiện (UUID)" }).fill(id);
   await page.getByRole("button", { name: "Áp dụng" }).click();
   await expect(page.getByText("Không có giao dịch phù hợp.")).toBeVisible();
+  const admin = await readData<{ accessToken: string }>(
+    await request.post(`${api}/auth/login`, {
+      data: { email: "admin@tickethub.vn", password },
+    }),
+  );
+  const adminHeaders = { Authorization: `Bearer ${admin.accessToken}` };
+  const fixture = prepareClosedEvent(id, `w06-${suffix}`);
+  try {
+    await readData(
+      await request.post(`${api}/admin/events/${id}/end`, {
+        headers: adminHeaders,
+      }),
+    );
+    fixture.importReport();
+  } finally {
+    fixture.cleanup();
+  }
   await page.getByRole("link", { name: "Chi trả", exact: true }).click();
   await page
     .getByRole("textbox", { name: "Mã sự kiện cần quyết toán" })
@@ -139,6 +211,27 @@ test("W06 FE1: kiểm duyệt, đình chỉ, khôi phục và quyết toán qua 
   await page.getByRole("button", { name: "Xác nhận", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
   await expect(payout.getByText("Đang tạm giữ")).toBeVisible();
+
+  const listing = await readData<{ items: { id: string }[] }>(
+    await request.get(`${api}/admin/payouts?eventId=${id}`, {
+      headers: adminHeaders,
+    }),
+  );
+  expect(listing.items).toHaveLength(1);
+  const payoutUrl = `${api}/admin/payouts/${listing.items[0]!.id}`;
+  expect(
+    (
+      await request.post(`${payoutUrl}/approve`, { headers: adminHeaders })
+    ).status(),
+  ).toBe(409);
+  await readData(
+    await request.post(`${payoutUrl}/release`, {
+      headers: adminHeaders,
+      data: { reason: "Đã xác minh số liệu và đối soát sạch" },
+    }),
+  );
+  await page.reload();
+  await expect(payout.getByText("Chờ phê duyệt")).toBeVisible();
 
   await payout.getByRole("button", { name: "Phê duyệt chi trả" }).click();
   await page.getByRole("button", { name: "Xác nhận", exact: true }).click();
