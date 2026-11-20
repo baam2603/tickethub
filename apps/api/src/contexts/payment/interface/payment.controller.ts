@@ -70,12 +70,11 @@ export class PaymentController {
   async reconcile(
     @CurrentUser() user: AuthenticatedUser,
     @Param("orderId", new ParseUUIDPipe()) orderId: string,
-    @Ip() clientIp: string,
   ) {
     return {
       success: true,
       data: await mapPaymentErrors(() =>
-        this.queryVnpay.reconcile(user.userId, orderId, clientIp),
+        this.queryVnpay.reconcile(user.userId, orderId),
       ),
     };
   }

@@ -533,7 +533,7 @@ Yêu cầu Bearer token của chủ đơn. Đọc `orderId`, `orderCode`, `order
 
 #### `POST /api/v1/payments/orders/:orderId/vnpay/query`
 
-Yêu cầu Bearer token của chủ đơn. Backend gọi QueryDR với ngày tạo giao dịch gốc. Chỉ phản hồi đúng chữ ký, merchant, mã tham chiếu, loại thanh toán và số tiền mới được đưa vào luồng xử lý trạng thái. Trả 503 khi phản hồi không thể xác minh hoặc VNPay không phản hồi.
+Yêu cầu Bearer token của chủ đơn. Backend gọi QueryDR với ngày tạo giao dịch gốc và IP merchant từ `VNPAY_REFUND_IP`. Mỗi tài khoản được gọi tối đa 3 lần trong 60 giây, vượt giới hạn trả 429. Chỉ phản hồi đúng chữ ký, merchant, mã tham chiếu, loại thanh toán và số tiền mới được đưa vào luồng xử lý trạng thái. Trả 503 khi phản hồi không thể xác minh hoặc VNPay không phản hồi.
 
 #### `GET /api/v1/payments/vnpay/ipn`
 
@@ -753,29 +753,17 @@ Tra cứu thủ công vé dự phòng bằng mã vé tĩnh 32 ký tự kết h�
 
 Tính trước số tiền hoàn lại theo chính sách trước khi xác nhận.
 
-- Request body: `{ "ticketId": "tkt-uuid" }`
-- Response 200:
-
-```json
-{
-  "success": true,
-  "data": {
-    "ticketPrice": 2500000,
-    "refundPercentage": 70,
-    "refundAmount": 1750000,
-    "feeDeducted": 750000,
-    "policyApplied": "Hủy trước sự kiện 3-7 ngày (hoàn 70%)"
-  }
-}
-```
+- Request body: `{ "orderId": "order-uuid", "ticketIds": ["ticket-uuid"] }`
+- Response 200: `data` gồm `orderId`, `policyType`, `daysUntilEvent`, `refundPercentage`, `items`, `totalRefundAmount` và `totalFeeDeducted`. Mỗi phần tử `items` có giá gốc, giá sau giảm và số tiền hoàn theo vé.
 
 #### `POST /api/v1/refund/request`
 
 Gửi yêu cầu hủy vé.
 
 - Header: `Authorization: Bearer <accessToken>`, `Idempotency-Key: <UUID>`
-- Request body: `{ "ticketId": "tkt-uuid", "reason": "Bận việc đột xuất" }`
-- Response 200: `{ "success": true, "data": { "refundId": "ref-uuid", "status": "PROCESSING" } }`
+- Request body: `{ "orderId": "order-uuid", "ticketIds": ["ticket-uuid"], "reason": "Bận việc đột xuất" }`
+- Response: `data` gồm `refundId`, `refundIds`, `orderId`, `status`, `refundAmount`, `cancelledTicketCount` và `orderStatus`.
+- Worker gửi một lệnh VNPay cho cả yêu cầu. Mã `02` áp dụng khi lệnh hoàn toàn bộ giao dịch gốc, mã `03` áp dụng cho khoản hoàn một phần.
 
 ### Quản trị hệ thống (`/admin`)
 

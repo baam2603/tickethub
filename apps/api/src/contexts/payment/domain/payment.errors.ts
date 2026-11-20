@@ -1,5 +1,5 @@
 export type PaymentErrorKind =
-  "UNAVAILABLE" | "NOT_FOUND" | "CONFLICT" | "BAD_REQUEST";
+  "RATE_LIMITED" | "UNAVAILABLE" | "NOT_FOUND" | "CONFLICT" | "BAD_REQUEST";
 
 /** Loi nghiep vu cua context Payment; than phan hoi cu la chuoi thuan. */
 export class PaymentDomainError extends Error {

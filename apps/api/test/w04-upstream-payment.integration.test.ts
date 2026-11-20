@@ -29,8 +29,14 @@ import { VNPAY_RESPONSE_FIELDS } from "../src/contexts/payment/infrastructure/vn
 import { PaymentController } from "../src/contexts/payment/interface/payment.controller";
 import { createPaymentUseCases } from "../src/contexts/payment/payment.composition";
 
+import Redis from "ioredis";
+import { createVnpayQueryLimit } from "../src/contexts/payment/infrastructure/redis-vnpay-query-limit";
+
 const jwt = new JwtService({ secret: env.JWT_SECRET });
-const payments = createPaymentUseCases();
+const redis = new Redis(env.REDIS_URL, { lazyConnect: true });
+const payments = createPaymentUseCases(undefined, undefined, {
+  takeQuerySlot: createVnpayQueryLimit(redis),
+});
 @Module({
   controllers: [PaymentController],
   providers: [
@@ -51,13 +57,18 @@ test("W04 upstream: kiểm giá và idempotency, tra cứu chủ đơn, chỉ ch
   let typeId: string | undefined;
   let app: NestFastifyApplication | undefined;
   const settings = {
+    NODE_ENV: env.NODE_ENV,
     VNPAY_TMN_CODE: env.VNPAY_TMN_CODE,
     VNPAY_HASH_SECRET: env.VNPAY_HASH_SECRET,
     VNPAY_API_URL: env.VNPAY_API_URL,
+    VNPAY_REFUND_IP: env.VNPAY_REFUND_IP,
   };
   const merchant = "W04TEST";
   const secret = "local-gateway-test-only";
   let invalid = true;
+  const queryIps: string[] = [];
+  const merchantIp = "192.0.2.8";
+  const rateKey = `payment:querydr:${buyer.id}`;
   const vendor = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => {
@@ -65,6 +76,7 @@ test("W04 upstream: kiểm giá và idempotency, tra cứu chủ đơn, chỉ ch
     });
     req.on("end", () => {
       const request = JSON.parse(body);
+      queryIps.push(request.vnp_IpAddr);
       const response: Record<string, string> = {
         vnp_ResponseId: "W04QUERY",
         vnp_Command: "querydr",
@@ -91,12 +103,14 @@ test("W04 upstream: kiểm giá và idempotency, tra cứu chủ đơn, chỉ ch
     });
   });
   try {
+    await redis.del(rateKey);
     await new Promise<void>((resolve) =>
       vendor.listen(0, "127.0.0.1", resolve),
     );
     const address = vendor.address();
     assert.ok(address && typeof address !== "string");
     Object.assign(env, {
+      VNPAY_REFUND_IP: undefined,
       VNPAY_TMN_CODE: merchant,
       VNPAY_HASH_SECRET: secret,
       VNPAY_API_URL: `http://127.0.0.1:${address.port}`,
@@ -193,11 +207,21 @@ test("W04 upstream: kiểm giá và idempotency, tra cứu chủ đơn, chỉ ch
       "PENDING",
     );
     assert.equal((await call(path + "/query", "POST")).status, 503);
+    env.NODE_ENV = "production";
+    env.VNPAY_REFUND_IP = "::ffff:127.0.0.1";
+    assert.equal((await call(path + "/query", "POST")).status, 503);
+    env.NODE_ENV = settings.NODE_ENV;
+    assert.deepEqual(queryIps, []);
+    env.VNPAY_REFUND_IP = merchantIp;
+    assert.equal((await call(path + "/query", "POST")).status, 503);
     invalid = false;
     assert.equal(
       (await (await call(path + "/query", "POST")).json()).data.decision,
       "APPLY_SUCCESS",
     );
+    assert.equal((await call(path + "/query", "POST")).status, 201);
+    assert.equal((await call(path + "/query", "POST")).status, 429);
+    assert.deepEqual(queryIps, [merchantIp, merchantIp, merchantIp]);
     assert.equal((await (await call(status)).json()).data.orderStatus, "PAID");
     assert.equal(
       (await db.select().from(tickets).where(eq(tickets.orderId, ids[0]!)))
@@ -205,6 +229,7 @@ test("W04 upstream: kiểm giá và idempotency, tra cứu chủ đơn, chỉ ch
       1,
     );
   } finally {
+    await redis.del(rateKey).finally(() => redis.disconnect());
     await app?.close();
     vendor.closeAllConnections();
     await new Promise<void>((resolve) => vendor.close(() => resolve()));

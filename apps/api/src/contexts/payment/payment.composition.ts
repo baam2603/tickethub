@@ -1,3 +1,4 @@
+import { readVnpayMerchantIp } from "./infrastructure/vnpay-merchant-ip";
 import { sqlClient } from "../../database/db";
 import { processPaymentEmails } from "./infrastructure/payment-email-worker";
 import { QueryVnpayPaymentUseCase } from "./application/query-vnpay-payment.use-case";
@@ -29,6 +30,7 @@ export interface PaymentOverrides {
   ipn?: IpnUnitOfWork;
   query?: PaymentQueryPort;
   notifier?: SettlementNotifier;
+  takeQuerySlot?: (userId: string) => Promise<boolean>;
 }
 
 /** Lap rap cac use case thanh toan; `cache`/`seatStream` thuoc context Event va la tuy chon. */
@@ -56,6 +58,9 @@ export function createPaymentUseCases(
       new DrizzlePaymentQuery(),
       new VnpayQueryGateway(),
       processIpn,
+      readVnpayMerchantIp,
+      overrides.takeQuerySlot ??
+        (() => Promise.reject(new Error("Query rate limit unavailable"))),
     ),
     previewIpn: new PreviewVnpayIpnUseCase(gateway, query),
   };

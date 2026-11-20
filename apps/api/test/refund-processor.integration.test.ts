@@ -67,6 +67,7 @@ async function createPendingRefund(opts: {
   isPartial?: boolean;
   retryCount?: number;
   createDate?: string;
+  amounts?: number[];
 }) {
   const [user] = await db.select({ id: users.id }).from(users).limit(1);
   const [event] = await db.select({ id: events.id }).from(events).limit(1);
@@ -96,23 +97,26 @@ async function createPendingRefund(opts: {
     rawCallback: { vnp_CreateDate: opts.createDate ?? "20260115103000" },
     idempotencyKey: `rfd-test:${orderId}`,
   });
-  const [refund] = await db
+  const group = await db
     .insert(refunds)
-    .values({
-      orderId,
-      amount: "500000.00",
-      reason: "PAYMENT_EXPIRED",
-      status: RefundStatus.PENDING,
-      idempotencyKey: `rfd-test-refund:${orderId}`,
-    })
+    .values(
+      (opts.amounts ?? [500000]).map((amount, index) => ({
+        orderId,
+        amount: String(amount),
+        reason: "PAYMENT_EXPIRED",
+        status: RefundStatus.PENDING,
+        idempotencyKey: `rfd-test-refund:${orderId}:${index}`,
+      })),
+    )
     .returning();
+  const refundIds = group.map(({ id }) => id);
   const [event_] = await db
     .insert(outbox)
     .values({
       eventType: "REFUND_REQUESTED",
       payload: {
         orderId,
-        refundIds: [refund!.id],
+        refundIds,
         isPartial: opts.isPartial ?? false,
         amount: 500000,
       },
@@ -125,7 +129,7 @@ async function createPendingRefund(opts: {
 
   return {
     orderId,
-    refundId: refund!.id,
+    refundId: refundIds[0]!,
     eventId: event_!.id,
     transactionRef: "RFD" + compact,
   };
@@ -194,7 +198,7 @@ if (!isSafeTestDb) {
   test("a successful VNPay refund completes the refund and outbox and moves the order to REFUNDED", async () => {
     server.requests.length = 0;
     server.behavior.responseCode = "00";
-    const f = await createPendingRefund({});
+    const f = await createPendingRefund({ amounts: [166667, 166666, 166667] });
 
     const res = await processor(server.url).run();
     assert.equal(res.completed, 1);
@@ -211,6 +215,14 @@ if (!isSafeTestDb) {
 
     const s = await state(f);
     assert.equal(s.refund.status, RefundStatus.COMPLETED);
+    const completed = await db
+      .select()
+      .from(refunds)
+      .where(eq(refunds.orderId, f.orderId));
+    assert.equal(completed.length, 3);
+    assert.ok(
+      completed.every((refund) => refund.status === RefundStatus.COMPLETED),
+    );
     assert.ok(s.refund.providerRefundRef);
     assert.ok(s.refund.processedAt);
     assert.equal(s.event.status, OutboxStatus.COMPLETED);

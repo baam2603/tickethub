@@ -357,7 +357,7 @@ if (!isSafeTestDb) {
     }
   });
 
-  test("Late IPN for a cancelled order restores GA stock when capacity allows", async () => {
+  test("Late IPN for a cancelled order queues a full refund even when capacity allows", async () => {
     const f = await createLateOrder({
       seated: false,
       orderStatus: OrderStatus.CANCELLED,
@@ -370,19 +370,24 @@ if (!isSafeTestDb) {
 
     assert.equal(
       await ipnFor(f.transactionRef).process(successCallback(f.amount)),
-      "LATE_RESTORED",
+      "LATE_REFUND_PENDING",
     );
     const state = await readState(f.orderId);
-    assert.equal(state.order?.status, OrderStatus.PAID);
-    assert.equal(state.transaction?.status, TransactionStatus.SUCCESS);
-    assert.equal(state.issued.length, 1);
-    assert.equal(state.orderRefunds.length, 0);
     assert.equal(
-      state.outboxEvents.filter((e) => e.eventType === "ORDER_PAID").length,
+      state.order?.status,
+      OrderStatus.PAYMENT_EXPIRED_REFUND_PENDING,
+    );
+    assert.equal(state.transaction?.status, TransactionStatus.SUCCESS);
+    assert.equal(state.issued.length, 0);
+    assert.equal(state.orderRefunds.length, 1);
+    assert.equal(
+      state.outboxEvents.filter((e) => e.eventType === "REFUND_REQUESTED")
+        .length,
       1,
     );
+    assert.equal(Number(state.orderRefunds[0]?.amount), Number(f.amount) / 100);
     const after_ = await inventory(f.ticketTypeId);
-    assert.equal(after_.soldCount, before_.soldCount + 1);
+    assert.equal(after_.soldCount, before_.soldCount);
     assert.equal(after_.heldCount, before_.heldCount);
 
     await db

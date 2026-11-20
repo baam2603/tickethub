@@ -24,6 +24,7 @@ export const EnvSchema = z
     JWT_SECRET: z.string().min(32).default(DEV_JWT_SECRET),
     JWT_ACCESS_EXPIRES_IN: z.string().default("15m"),
     JWT_REFRESH_EXPIRES_IN: z.string().default("7d"),
+    VNPAY_REFUND_IP: z.string().optional(),
     VNPAY_TMN_CODE: z.string().default("TEST_TMN_CODE"),
     VNPAY_HASH_SECRET: z.string().default("TEST_HASH_SECRET"),
     VNPAY_URL: z

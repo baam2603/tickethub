@@ -1,3 +1,4 @@
+import { OrderStatus } from "@tickethub/shared";
 import type { IpnDecision } from "../domain/ipn-decision";
 import {
   areSettlementItemsValid,
@@ -182,6 +183,7 @@ export class ProcessVnpayIpnUseCase {
     const eventStatus = await tx.findEventStatus(order.eventId);
 
     const restorable =
+      order.status !== OrderStatus.CANCELLED &&
       areSettlementItemsValid(items) &&
       eventAllowsRestoration(eventStatus) &&
       (await tx.tryRestoreOrder(order, items, now));

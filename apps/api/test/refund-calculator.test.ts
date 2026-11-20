@@ -5,6 +5,24 @@ import { calculateTicketRefundBreakdown } from "../src/contexts/refund/domain/re
 import { computeRefundPercentage } from "../src/contexts/refund/domain/refund-policy";
 
 describe("RefundCalculator", () => {
+  it("refunds the exact amount paid for a voucher order with three tickets", () => {
+    const breakdown = calculateTicketRefundBreakdown({
+      tickets: ["a", "b", "c"].map((ticketId) => ({
+        ticketId,
+        unitPrice: 100000,
+      })),
+      totalAmount: 300000,
+      finalAmount: 100000,
+      refundPercentage: 100,
+    });
+    assert.equal(breakdown.totalRefundAmount, 100000);
+    assert.equal(breakdown.totalFeeDeducted, 0);
+    assert.deepEqual(
+      breakdown.items.map((item) => item.refundAmount),
+      [33333, 33334, 33333],
+    );
+  });
+
   const eventStart = new Date("2026-11-20T20:00:00.000Z");
 
   it("returns 100% for FLEXIBLE policy 8 days before event", () => {

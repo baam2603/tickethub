@@ -53,9 +53,17 @@ export function calculateTicketRefundBreakdown(
   let totalRefundAmount = 0;
   let totalFeeDeducted = 0;
 
-  for (const t of tickets) {
+  let cumulativePrice = 0;
+  let allocatedPaid = 0;
+  // Phân bổ phần lẻ trên tổng lũy kế để hoàn toàn đơn đúng số tiền đã thu.
+  for (const t of [...tickets].sort((first, second) =>
+    first.ticketId.localeCompare(second.ticketId),
+  )) {
     const originalPrice = t.unitPrice;
-    const effectivePaidPrice = Math.round(originalPrice * paidRatio);
+    cumulativePrice += originalPrice;
+    const cumulativePaid = Math.round(cumulativePrice * paidRatio);
+    const effectivePaidPrice = cumulativePaid - allocatedPaid;
+    allocatedPaid = cumulativePaid;
     const calculatedRefund = Math.round(
       effectivePaidPrice * (refundPercentage / 100),
     );

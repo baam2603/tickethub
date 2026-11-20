@@ -11,6 +11,7 @@ import {
   auditLog,
   events,
   idempotencyKeys,
+  orderItems,
   orders,
   outbox,
   refunds,
@@ -53,6 +54,18 @@ async function sumRefunded(reader: DbReader, orderId: string) {
   return rows.reduce((sum, r) => sum + Number(r.amount), 0);
 }
 
+async function snapshotPrices(reader: DbReader, orderId: string) {
+  const rows = await reader
+    .select({
+      seatId: orderItems.seatId,
+      typeId: orderItems.ticketTypeId,
+      price: orderItems.unitPrice,
+    })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderId));
+  return new Map(rows.map((row) => [row.seatId ?? row.typeId, row.price]));
+}
+
 export class DrizzleRefundQuery implements RefundQueryPort {
   async findOrderWithEvent(orderId: string) {
     const row = await db.query.orders.findFirst({
@@ -77,6 +90,7 @@ export class DrizzleRefundQuery implements RefundQueryPort {
       where: and(eq(tickets.orderId, orderId), inArray(tickets.id, ticketIds)),
       with: { ticketType: true, seat: true },
     });
+    const prices = await snapshotPrices(db, orderId);
     return rows.map((t) => ({
       id: t.id,
       ticketCode: t.ticketCode,
@@ -84,7 +98,9 @@ export class DrizzleRefundQuery implements RefundQueryPort {
       ticketTypeId: t.ticketTypeId,
       seatId: t.seatId,
       eventId: t.eventId,
-      unitPrice: Number(t.ticketType?.price || 0),
+      unitPrice: Number(
+        prices.get(t.seatId ?? t.ticketTypeId) ?? t.ticketType?.price ?? 0,
+      ),
       seatLabel: t.seat
         ? `Hàng ${t.seat.rowLabel} - Ghế ${t.seat.seatNumber}`
         : t.ticketType?.name || "GA",
@@ -139,6 +155,7 @@ class DrizzleRefundTransaction implements RefundTransaction {
           rows.map((t) => t.ticketTypeId),
         ),
       );
+    const prices = await snapshotPrices(this.tx, orderId);
     const priceByType = new Map(ttRows.map((tt) => [tt.id, tt.price]));
 
     return rows.map((t) => ({
@@ -148,7 +165,11 @@ class DrizzleRefundTransaction implements RefundTransaction {
       ticketTypeId: t.ticketTypeId,
       seatId: t.seatId,
       eventId: t.eventId,
-      unitPrice: Number(priceByType.get(t.ticketTypeId) || 0),
+      unitPrice: Number(
+        prices.get(t.seatId ?? t.ticketTypeId) ??
+          priceByType.get(t.ticketTypeId) ??
+          0,
+      ),
       seatLabel: "GA",
     }));
   }

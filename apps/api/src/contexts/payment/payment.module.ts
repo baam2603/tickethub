@@ -1,4 +1,7 @@
 import { QueryVnpayPaymentUseCase } from "./application/query-vnpay-payment.use-case";
+import type Redis from "ioredis";
+import { REDIS_CLIENT, RedisModule } from "../../database/redis.module";
+import { createVnpayQueryLimit } from "./infrastructure/redis-vnpay-query-limit";
 import { Module } from "@nestjs/common";
 import { EventModule } from "../event/event.module";
 import { EventReadModel } from "../event/application/event-read-model";
@@ -15,7 +18,7 @@ const PAYMENT_USE_CASES = Symbol("PAYMENT_USE_CASES");
 type PaymentUseCases = ReturnType<typeof createPaymentUseCases>;
 
 @Module({
-  imports: [EventModule],
+  imports: [EventModule, RedisModule],
   controllers: [
     PaymentController,
     VnpayIpnPreviewController,
@@ -24,9 +27,16 @@ type PaymentUseCases = ReturnType<typeof createPaymentUseCases>;
   providers: [
     {
       provide: PAYMENT_USE_CASES,
-      useFactory: (cache?: EventReadModel, stream?: SeatStreamService) =>
-        createPaymentUseCases(cache, stream),
+      useFactory: (
+        redis: Redis,
+        cache?: EventReadModel,
+        stream?: SeatStreamService,
+      ) =>
+        createPaymentUseCases(cache, stream, {
+          takeQuerySlot: createVnpayQueryLimit(redis),
+        }),
       inject: [
+        REDIS_CLIENT,
         { token: EventReadModel, optional: true },
         { token: SeatStreamService, optional: true },
       ],

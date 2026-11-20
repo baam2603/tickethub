@@ -1,5 +1,4 @@
 import { paymentErrors, PaymentDomainError } from "../domain/payment.errors";
-import { resolveClientIp } from "../domain/payment-rules";
 import type { VnpayParams } from "../domain/payment.models";
 import type { ProcessVnpayIpnUseCase } from "./process-vnpay-ipn.use-case";
 
@@ -29,6 +28,8 @@ export class QueryVnpayPaymentUseCase {
     private readonly reader: OwnedPaymentReader,
     private readonly gateway: QueryGateway,
     private readonly ipn: ProcessVnpayIpnUseCase,
+    private readonly merchantIp: () => string,
+    private readonly takeQuerySlot: (userId: string) => Promise<boolean>,
   ) {}
 
   async status(userId: string, transactionRef: string) {
@@ -40,7 +41,7 @@ export class QueryVnpayPaymentUseCase {
     return { orderId, orderCode, orderStatus, transactionStatus };
   }
 
-  async reconcile(userId: string, orderId: string, ipAddress: string) {
+  async reconcile(userId: string, orderId: string) {
     const row = await this.reader.findOwnedPayment(userId, { orderId });
     if (!row) throw paymentErrors.orderNotFound();
     if (!row.createDate)
@@ -48,12 +49,26 @@ export class QueryVnpayPaymentUseCase {
         "CONFLICT",
         "Original VNPay transaction date is missing",
       );
+    let allowed: boolean;
+    let ipAddress: string;
+    try {
+      ipAddress = this.merchantIp();
+      allowed = await this.takeQuerySlot(userId);
+    } catch {
+      throw new PaymentDomainError("UNAVAILABLE", "VNPay query unavailable");
+    }
+    if (!allowed)
+      throw new PaymentDomainError(
+        "RATE_LIMITED",
+        "VNPay query limit exceeded",
+      );
+
     let params: VnpayParams;
     try {
       params = await this.gateway.queryTransaction({
         transactionRef: row.transactionRef,
         transactionDate: row.createDate,
-        ipAddress: resolveClientIp(ipAddress),
+        ipAddress,
       });
     } catch {
       throw new PaymentDomainError(

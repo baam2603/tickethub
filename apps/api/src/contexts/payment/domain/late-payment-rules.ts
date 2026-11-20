@@ -26,7 +26,7 @@ export function canRestoreSeat(seat: RestorableSeat, orderId: string): boolean {
 
 /**
  * Ve dung: neu don con PENDING thi cho giu cua don chua bi tra (held_count con du);
- * neu don da EXPIRED/CANCELLED thi cho da duoc tra, phai con du suc chua de giu lai.
+ * neu don da EXPIRED thi cho da duoc tra, phai con du suc chua de giu lai.
  */
 export function canRestoreStanding(
   inventory: RestorableInventory,

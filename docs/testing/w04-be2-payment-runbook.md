@@ -1,6 +1,18 @@
 # Runbook W04-BE2 trên unstable
 
+## Nâng cấp cơ sở dữ liệu
+
+Migration `0005_goofy_ken_ellis.sql` mở rộng `orders.status`. Trên DB cũ, chạy migration bằng vai trò
+có quyền quản lý các materialized views báo cáo. Migration giữ định nghĩa, index, owner và quyền truy
+cập của bốn view báo cáo đã biết. Nếu có view phụ thuộc ngoài danh sách, PostgreSQL hủy toàn bộ
+thay đổi để người vận hành kiểm tra phụ thuộc trước khi chạy lại.
+
+IPN thành công đến muộn cho đơn đã `CANCELLED` hoặc sự kiện không còn `PUBLISHED` dẫn đến hoàn
+100%, kể cả còn vé. Đơn hết hạn giữ chỗ ở sự kiện còn mở có thể được khôi phục nếu kho còn đủ.
+
 ## Cấu hình Sandbox
+
+Đặt `VNPAY_REFUND_IP` thành IP merchant đã đăng ký cho API và worker. QueryDR dùng cấu hình này và Redis để giới hạn lượt gọi. Ở production, API và worker từ chối IP loopback.
 
 - Đặt `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` qua cấu hình bí mật của tiến trình API và worker. Dùng mã merchant và khóa Sandbox đã được cấp.
 - Dùng `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html` cho `VNPAY_URL` và endpoint merchant Sandbox cho `VNPAY_API_URL`. Bật hỗ trợ proxy theo cấu hình Node của môi trường nếu cần.

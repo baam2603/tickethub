@@ -3,7 +3,7 @@ import { VnpayQueryGateway } from "../infrastructure/vnpay-query.gateway";
  * Tien trinh nen: tieu thu outbox REFUND_REQUESTED va goi API hoan tien VNPay.
  * Can ENABLE_VNPAY_REFUND_PROCESSING=true va thong tin dang nhap VNPay that.
  */
-import { isIP } from "node:net";
+import { readVnpayMerchantIp } from "../infrastructure/vnpay-merchant-ip";
 import { env } from "../../../config/env.config";
 import { sqlClient } from "../../../database/db";
 import { ProcessRefundRequestsUseCase } from "../application/process-refund-requests.use-case";
@@ -21,9 +21,7 @@ async function main() {
   const endpoint = new URL(env.VNPAY_API_URL);
   if (endpoint.protocol !== "https:")
     throw new Error("VNPay refund endpoint requires HTTPS");
-  const refundIp = process.env.VNPAY_REFUND_IP?.trim();
-  if (!refundIp || !isIP(refundIp))
-    throw new Error("Set VNPAY_REFUND_IP to the merchant's configured IP");
+  const refundIp = readVnpayMerchantIp();
 
   const useCase = new ProcessRefundRequestsUseCase(
     new DrizzleRefundProcessingStore(),
