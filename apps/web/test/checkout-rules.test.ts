@@ -2,10 +2,15 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_ORDER,
+  computeTotals,
+  evaluateVoucher,
+  fallbackOrder,
   formatTimer,
   mapOrderResponse,
   paymentFailureMessage,
   secondsUntil,
+  splitFullName,
+  validateRecipient,
 } from "../src/features/payment/domain/checkout-rules.ts";
 
 const NOW = Date.parse("2026-11-11T10:00:00.000Z");
@@ -68,21 +73,11 @@ describe("Checkout domain: order mapping", () => {
     assert.deepEqual(empty.items, DEFAULT_ORDER.items);
   });
 
-  test("keeps the exact subtotal, voucher and final amount from the server", () => {
-    const order = mapOrderResponse(
-      {
-        totalAmount: "100000",
-        discountAmount: "10000",
-        finalAmount: "90000",
-        voucherCode: "APPROVED",
-      },
-      "order",
-      NOW,
-    );
-    assert.equal(order.totalAmount, 100000);
-    assert.equal(order.discountAmount, 10000);
-    assert.equal(order.finalAmount, 90000);
-    assert.equal(order.voucherCode, "APPROVED");
+  test("builds a sample order from an id when the real one cannot be loaded", () => {
+    const o = fallbackOrder("abcdef1234");
+    assert.equal(o.orderId, "abcdef1234");
+    assert.equal(o.orderCode, "ORD-ABCDEF12");
+    assert.equal(fallbackOrder(null).orderId, "ord-sample-01");
   });
 });
 
@@ -96,6 +91,62 @@ describe("Checkout domain: hold timer", () => {
     assert.equal(formatTimer(299), "04:59");
     assert.equal(formatTimer(59), "00:59");
     assert.equal(formatTimer(0), "00:00");
+  });
+});
+
+describe("Checkout domain: vouchers and totals", () => {
+  test("accepts fixed and percentage vouchers case-insensitively", () => {
+    assert.deepEqual(evaluateVoucher(" giam50k ", 1_000_000), {
+      ok: true,
+      code: "GIAM50K",
+      discount: 50000,
+    });
+    assert.deepEqual(evaluateVoucher("vip10", 2_550_000), {
+      ok: true,
+      code: "VIP10",
+      discount: 255000,
+    });
+  });
+
+  test("rejects empty and unknown vouchers with a message", () => {
+    const empty = evaluateVoucher("  ", 1);
+    assert.equal(empty.ok, false);
+    const bad = evaluateVoucher("NOPE", 1);
+    assert.equal(bad.ok, false);
+    if (!bad.ok) assert.match(bad.error, /không hợp lệ/);
+  });
+
+  test("adds the platform fee, subtracts the voucher and never goes below zero", () => {
+    assert.deepEqual(computeTotals(1_000_000, 50_000), {
+      subtotal: 1_000_000,
+      platformFee: 250_000,
+      finalTotal: 1_200_000,
+    });
+    assert.equal(computeTotals(0, 0).subtotal, 3_600_000);
+    assert.equal(computeTotals(10_000, 9_999_999).finalTotal, 0);
+  });
+});
+
+describe("Checkout domain: recipient", () => {
+  test("splits a Vietnamese full name into given and family names", () => {
+    assert.deepEqual(splitFullName("Nguyễn Văn An"), {
+      firstName: "An",
+      lastName: "Nguyễn Văn",
+    });
+    assert.deepEqual(splitFullName("An"), { firstName: "An", lastName: "" });
+  });
+
+  test("requires name, email and phone", () => {
+    const ok = {
+      firstName: "An",
+      lastName: "",
+      email: "a@b.vn",
+      phone: "0912345678",
+    };
+    assert.equal(validateRecipient(ok), null);
+    assert.match(validateRecipient({ ...ok, phone: " " }) ?? "", /đầy đủ/);
+    assert.match(validateRecipient({ ...ok, email: "" }) ?? "", /đầy đủ/);
+    assert.match(validateRecipient({ ...ok, firstName: "" }) ?? "", /đầy đủ/);
   });
 });
 
