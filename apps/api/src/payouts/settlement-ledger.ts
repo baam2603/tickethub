@@ -5,6 +5,9 @@ import { db } from "../database/db";
 import { events, orders, refunds, transactions } from "../database/schema";
 import { calculatePayout } from "./payout-calculator";
 
+// Invalidate existing reports when the rules used to match the ledger change.
+const MATCHING_RULES_VERSION = 2;
+
 export type SettlementTransaction = Parameters<
   Parameters<typeof db.transaction>[0]
 >[0];
@@ -87,7 +90,12 @@ export async function readSettlementLedger(
     .where(eq(orders.eventId, eventId))
     .orderBy(refunds.id);
   const ledgerHash = hash(
-    JSON.stringify([eventOrders, payments, eventRefunds]),
+    JSON.stringify([
+      MATCHING_RULES_VERSION,
+      eventOrders,
+      payments,
+      eventRefunds,
+    ]),
   );
   const calculation = calculatePayout(
     payments

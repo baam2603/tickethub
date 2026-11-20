@@ -1,7 +1,8 @@
+import { isIP } from "node:net";
 import { z } from "zod";
 import dotenv from "dotenv";
 import path from "path";
-import { parseIpAllowlist } from "./ip-allowlist";
+import { isAllowedIp, parseIpAllowlist } from "./ip-allowlist";
 
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 dotenv.config();
@@ -130,6 +131,16 @@ export const EnvSchema = z
             // Kiểu URL đã được kiểm tra trong schema.
           }
         }
+      }
+      if (
+        config.ENABLE_VNPAY_REFUNDS === "true" &&
+        (!isIP(config.VNPAY_REFUND_IP) ||
+          isAllowedIp(
+            parseIpAllowlist("127.0.0.0/8,::1"),
+            config.VNPAY_REFUND_IP,
+          ))
+      ) {
+        issue("VNPAY_REFUND_IP", "Set the registered non-loopback merchant IP");
       }
       if (ipnEnabled && !config.VNPAY_IPN_ALLOWED_CIDRS.trim()) {
         issue(

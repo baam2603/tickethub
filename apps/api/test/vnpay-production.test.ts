@@ -70,6 +70,25 @@ describe("VNPay production policy", () => {
       }).success,
       true,
     );
+    for (const ip of ["127.0.0.1", "::ffff:7f00:1", "::1", "invalid"]) {
+      const result = EnvSchema.safeParse({
+        ...configured,
+        ENABLE_VNPAY_REFUNDS: "true",
+        VNPAY_REFUND_IP: ip,
+      });
+      assert.equal(result.success, false);
+      assert.ok(
+        result.error.issues.some(({ path }) => path[0] === "VNPAY_REFUND_IP"),
+      );
+    }
+    assert.equal(
+      EnvSchema.safeParse({
+        ...configured,
+        ENABLE_VNPAY_REFUNDS: "true",
+        VNPAY_REFUND_IP: "198.51.100.10",
+      }).success,
+      true,
+    );
     const list = parseIpAllowlist(configured.VNPAY_IPN_ALLOWED_CIDRS);
     assert.equal(isAllowedIp(list, "::ffff:192.0.2.9"), true);
     assert.equal(isAllowedIp(list, "2001:db8::1"), true);

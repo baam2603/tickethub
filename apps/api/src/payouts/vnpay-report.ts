@@ -9,6 +9,7 @@ export interface VnpayReportRow {
   ref: string;
   number: string;
   amount: number;
+  transactionType: "01" | "02" | "03";
 }
 
 export function parseVnpayReport(csv: string): VnpayReportRow[] {
@@ -46,7 +47,7 @@ export function parseVnpayReport(csv: string): VnpayReportRow[] {
       !/^[A-Za-z0-9_-]{1,100}$/.test(ref) ||
       !/^\d{1,15}$/.test(number) ||
       amount === null ||
-      !["01", "02", "03"].includes(type)
+      (type !== "01" && type !== "02" && type !== "03")
     ) {
       throw new BadRequestException(`INVALID_VNPAY_REPORT_ROW: ${index + 2}`);
     }
@@ -56,6 +57,6 @@ export function parseVnpayReport(csv: string): VnpayReportRow[] {
     }
     seen.add(key);
     if (kind === "PAYMENT") paymentRefs.add(ref);
-    return { kind, ref, number, amount };
+    return { kind, ref, number, amount, transactionType: type };
   });
 }

@@ -1105,7 +1105,9 @@ Tính quyết toán cho sự kiện `ENDED` hoặc `CANCELLED`. Doanh thu lấy 
 
 #### `POST /api/v1/admin/payouts/:id/approve`
 
-Xác nhận chi trả mô phỏng. Lệnh phải ở `PENDING`, kết quả đối soát còn khớp với dữ liệu hiện tại, các phiếu điều tra đã đóng và số tiền đã được tính lại. Trả 409 khi điều kiện chưa đạt. Với lỗi PostgreSQL xác nhận rollback, API thử lại tối đa ba lần và phát cảnh báo khi hết lượt.
+Nếu PostgreSQL xác nhận rollback sau khi kiểm tra điều kiện duyệt, API có thể trả `503 PAYOUT_APPROVAL_QUEUED`. Tác vụ được lưu bền vững. Theo dõi trạng thái lệnh bằng API danh sách chi trả.
+
+Xác nhận chi trả mô phỏng. Lệnh phải ở `PENDING`, kết quả đối soát còn khớp với dữ liệu hiện tại, các phiếu điều tra đã đóng và số tiền đã được tính lại. Trả 409 khi điều kiện chưa đạt. Report worker thử lại tác vụ đã lưu, tối đa ba lượt tính cả lượt API, và phát cảnh báo khi hết lượt.
 
 - Header: `Authorization: Bearer <adminToken>`
 - Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT` và ghi vết kiểm toán vào `audit_log`.

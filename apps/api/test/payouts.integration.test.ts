@@ -10,7 +10,7 @@ import {
   FastifyAdapter,
   type NestFastifyApplication,
 } from "@nestjs/platform-fastify";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { env } from "../src/config/env.config";
 import { db, sqlClient } from "../src/database/db";
 import {
@@ -19,6 +19,7 @@ import {
   events,
   orders,
   organizerProfiles,
+  outbox,
   payouts,
   reconciliationReports,
   reconciliationCases,
@@ -31,6 +32,8 @@ import { OrganizerPayoutsController } from "../src/payouts/organizer-payouts.con
 import { PayoutsService } from "../src/payouts/payouts.service";
 import { ReconciliationsService } from "../src/payouts/reconciliations.service";
 import { processAdminSettlementExport } from "../src/reporting/admin-settlement-exports";
+import { processPayoutApprovalRetry } from "../src/jobs/payout-approval.worker";
+import { PAYOUT_APPROVAL_RETRY } from "../src/payouts/approval-intent";
 import { retryPayoutApproval } from "../src/payouts/approval-retry";
 import { refreshReportViews } from "../src/reporting/report-data";
 
@@ -183,15 +186,17 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
       payDate: now,
       idempotencyKey: randomUUID(),
     });
-    await db.insert(refunds).values({
-      orderId,
-      amount: "20000",
-      status: "COMPLETED",
-      providerRefundRef: refundNumber,
-      processedAt: now,
-      reason: "Partial refund",
-      idempotencyKey: randomUUID(),
-    });
+    await db.insert(refunds).values(
+      [12000, 8000].map((amount) => ({
+        orderId,
+        amount: String(amount),
+        status: "COMPLETED" as const,
+        providerRefundRef: refundNumber,
+        processedAt: now,
+        reason: "Partial refund",
+        idempotencyKey: randomUUID(),
+      })),
+    );
     report = csv(
       `${paymentRef},${paymentNumber},10000000,01`,
       `${paymentRef},${refundNumber},2000000,03`,
@@ -212,6 +217,15 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
         .delete(payouts)
         .where(inArray(payouts.eventId, createdEvents))
         .returning({ id: payouts.id });
+      await db.delete(outbox).where(
+        and(
+          eq(outbox.eventType, PAYOUT_APPROVAL_RETRY),
+          inArray(
+            sql<string>`${outbox.payload}->>'payoutId'`,
+            settlementIds.map(({ id }) => id),
+          ),
+        ),
+      );
       await db
         .delete(auditLog)
         .where(
@@ -295,6 +309,7 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
     const mismatch = csv(
       `${paymentRef},${paymentNumber},9000000,01`,
       "ORPHAN,998,100000,01",
+      `${paymentRef},${refundNumber},2000000,02`,
     );
     const imported = await reconciliation.importReport(eventId, mismatch);
     assert.equal(imported.discrepancyCount, 3);
@@ -349,6 +364,13 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
       root + "/" + imported.investigationId + "?limit=1",
     );
     const details = (await evidence.json()).data;
+    const fullEvidence = await http(root + "/" + imported.investigationId);
+    assert.ok(
+      (await fullEvidence.json()).data.items.some(
+        (item: { issue: string }) =>
+          item.issue === "REFUND_TRANSACTION_TYPE_MISMATCH",
+      ),
+    );
     assert.equal(details.items.length, 1);
     assert.equal(details.meta.hasMore, true);
     const blocked = await http(`/admin/payouts/${payout.id}/release`, {
@@ -467,12 +489,54 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
       ).status,
       200,
     );
-    const responses = await Promise.all(
-      Array.from({ length: 2 }, () =>
-        http(`/admin/payouts/${payout.id}/approve`, { method: "POST" }),
-      ),
-    );
-    assert.deepEqual(responses.map((row) => row.status).sort(), [200, 409]);
+    const approvalPath = `/admin/payouts/${payout.id}/approve`;
+    await sqlClient`CREATE FUNCTION w06_approval_rollback_fixture() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'PAID_OUT' THEN RAISE EXCEPTION 'fixture rollback' USING ERRCODE = '40001'; END IF;
+        RETURN NEW;
+      END;
+    $$ LANGUAGE plpgsql`;
+    try {
+      await sqlClient`CREATE TRIGGER w06_fixture BEFORE UPDATE ON payouts
+        FOR EACH ROW EXECUTE FUNCTION w06_approval_rollback_fixture()`;
+      const queued = await http(approvalPath, { method: "POST" });
+      assert.equal(queued.status, 503);
+      assert.equal((await queued.json()).message, "PAYOUT_APPROVAL_QUEUED");
+      await processPayoutApprovalRetry();
+      const [job] = await db
+        .select()
+        .from(outbox)
+        .where(eq(outbox.eventType, PAYOUT_APPROVAL_RETRY));
+      assert.equal(job?.status, "PENDING");
+      assert.equal(job?.retryCount, 2);
+      assert.ok(job);
+      await db
+        .update(outbox)
+        .set({ nextRetryAt: new Date(0) })
+        .where(eq(outbox.id, job.id));
+      assert.equal(await processPayoutApprovalRetry(), true);
+      const [failed] = await db
+        .select()
+        .from(outbox)
+        .where(eq(outbox.id, job.id));
+      assert.equal(failed?.status, "FAILED");
+      assert.equal(failed?.retryCount, 3);
+      const [stillPending] = await db
+        .select()
+        .from(payouts)
+        .where(eq(payouts.id, payout.id));
+      assert.equal(stillPending?.status, "PENDING");
+      assert.equal((await http(approvalPath, { method: "POST" })).status, 503);
+    } finally {
+      await sqlClient`DROP TRIGGER IF EXISTS w06_fixture ON payouts`;
+      await sqlClient`DROP FUNCTION w06_approval_rollback_fixture()`;
+    }
+    const processed = await Promise.all([
+      processPayoutApprovalRetry(),
+      processPayoutApprovalRetry(),
+    ]);
+    assert.deepEqual(processed.sort(), [false, true]);
+    assert.equal((await http(approvalPath, { method: "POST" })).status, 409);
     const logs = await db
       .select()
       .from(auditLog)

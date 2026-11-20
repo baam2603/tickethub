@@ -122,22 +122,40 @@ export function matchReconciliation(
     }
   }
 
-  const refundTotals = new Map<string, number>();
-  const refundNumbers = new Set<string>();
+  // Một lệnh hoàn tiền có thể ghi nhiều dòng hoàn theo vé với cùng mã VNPay.
+  const refundGroups = new Map<string, typeof ledger.eventRefunds>();
+  const refundOwners = new Map<string, Set<string>>();
   for (const refund of ledger.eventRefunds) {
+    const grouped = refund.status === "COMPLETED" && refund.number;
+    const key = grouped ? `${refund.orderId}:${refund.number}` : refund.id;
+    const group = refundGroups.get(key) ?? [];
+    group.push(refund);
+    refundGroups.set(key, group);
+    if (grouped && refund.number) {
+      const owners = refundOwners.get(refund.number) ?? new Set<string>();
+      owners.add(refund.orderId);
+      refundOwners.set(refund.number, owners);
+    }
+  }
+
+  const refundTotals = new Map<string, number>();
+  for (const group of refundGroups.values()) {
+    const refund = group[0]!;
     const order = orders.get(refund.orderId)!;
     const payments = localPayments.get(order.id) ?? [];
     const payment = payments[0];
     const completed = refund.status === "COMPLETED";
-    const refundedAmount = completed ? Number(refund.amount) : 0;
+    const refundedAmount = completed
+      ? group.reduce((sum, entry) => sum + Number(entry.amount), 0)
+      : 0;
     const runningTotal = (refundTotals.get(order.id) ?? 0) + refundedAmount;
     refundTotals.set(order.id, runningTotal);
     const gateway =
       completed && refund.number ? refundRows.get(refund.number) : undefined;
     if (gateway) consumed.add(gateway);
     const duplicateNumber =
-      refund.number !== null && refundNumbers.has(refund.number);
-    if (completed && refund.number !== null) refundNumbers.add(refund.number);
+      refund.number !== null &&
+      (refundOwners.get(refund.number)?.size ?? 0) > 1;
     let issue = null;
     if (!completed) issue = "REFUND_UNRESOLVED";
     else if (duplicateNumber) issue = "DUPLICATE_LOCAL_REFUND";
@@ -148,6 +166,11 @@ export function matchReconciliation(
       issue = "GATEWAY_AMOUNT_MISMATCH";
     else if (gateway.ref !== payment?.ref)
       issue = "REFUND_PAYMENT_REFERENCE_MISMATCH";
+    else if (
+      gateway.transactionType !==
+      (refundedAmount === Number(payment?.amount) ? "02" : "03")
+    )
+      issue = "REFUND_TRANSACTION_TYPE_MISMATCH";
     items.push({
       ...base,
       kind: "REFUND",

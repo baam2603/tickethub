@@ -1,4 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { processPayoutApprovalRetry } from "./payout-approval.worker";
+import {
+  flushPaymentMonitoring,
+  initializePaymentMonitoring,
+} from "../monitoring/payment-monitoring";
 import { sqlClient } from "../database/db";
 import {
   cleanupAdminSettlementExports,
@@ -18,16 +23,18 @@ process.once("SIGTERM", () => {
   stopping = true;
 });
 async function main() {
+  initializePaymentMonitoring();
   let refreshed = 0;
   do {
     let processed: boolean;
     try {
+      processed = await processPayoutApprovalRetry();
       if (Date.now() - refreshed >= 300000) {
         if (await refreshReportViews()) refreshed = Date.now();
         await cleanupReportExports();
         await cleanupAdminSettlementExports();
       }
-      processed = await processReportExport();
+      processed = (await processReportExport()) || processed;
       processed = (await processAdminSettlementExport()) || processed;
       // Loi cau hinh/provider thong bao khong chan xu ly file tiep theo.
       try {
@@ -59,4 +66,7 @@ main()
     );
     process.exitCode = 1;
   })
-  .finally(() => sqlClient.end());
+  .finally(async () => {
+    await flushPaymentMonitoring();
+    await sqlClient.end();
+  });
