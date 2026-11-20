@@ -1,8 +1,18 @@
+import {
+  TicketingDomainError,
+  ticketingErrors,
+} from "../domain/ticketing.errors";
 import { and, asc, count, eq, inArray } from "drizzle-orm";
-import { TicketStatus } from "@tickethub/shared";
+import {
+  EventStatus,
+  TicketStatus,
+  UserRole,
+  type GateScanResponse,
+} from "@tickethub/shared";
 import { db } from "../../../database/db";
 import {
   auditLog,
+  gateCheckinLogs,
   eventStaff,
   events,
   gates,
@@ -13,40 +23,16 @@ import {
   users,
 } from "../../../database/schema";
 import type {
-  CheckedInTicket,
-  GateEventRef,
-  LookupTicketRow,
   MyTicketsPage,
   MyTicketsQuery,
   QrTicketRecord,
-  ScanTicketDetails,
-  TicketStateRow,
 } from "../domain/ticketing.models";
 import type {
   GateRepository,
+  GateCheckInInput,
   MyTicketsReader,
   TicketQrReader,
 } from "../domain/ticketing.ports";
-
-function checkInValues(staffUserId: string, gateId: string | null, now: Date) {
-  return {
-    status: TicketStatus.CHECKED_IN,
-    checkedInAt: now,
-    checkedInBy: staffUserId,
-    gateId,
-    updatedAt: now,
-  };
-}
-
-function toCheckedIn(row: typeof tickets.$inferSelect): CheckedInTicket {
-  return {
-    id: row.id,
-    ticketCode: row.ticketCode,
-    status: row.status,
-    checkedInAt: row.checkedInAt!,
-    gateId: row.gateId ?? null,
-  };
-}
 
 export class DrizzleTicketQrReader implements TicketQrReader {
   async findForQr(ticketId: string): Promise<QrTicketRecord | null> {
@@ -67,151 +53,302 @@ export class DrizzleTicketQrReader implements TicketQrReader {
   }
 }
 
+function alreadyCheckedIn(
+  ticket: Pick<
+    typeof tickets.$inferSelect,
+    "checkedInAt" | "gateId" | "checkedInBy"
+  >,
+) {
+  return new TicketingDomainError(
+    "CONFLICT",
+    "TICKET_ALREADY_USED",
+    "TICKET_ALREADY_USED: Vé đã được soát",
+    {
+      checkedInAt: ticket.checkedInAt?.toISOString() ?? null,
+      gateId: ticket.gateId,
+      staffId: ticket.checkedInBy,
+    },
+  );
+}
+
 export class DrizzleGateRepository implements GateRepository {
-  async isStaffAssigned(eventId: string, staffUserId: string) {
-    const [assignment] = await db
-      .select({ id: eventStaff.id })
-      .from(eventStaff)
-      .where(
-        and(
-          eq(eventStaff.eventId, eventId),
-          eq(eventStaff.userId, staffUserId),
-        ),
-      )
-      .limit(1);
-    return Boolean(assignment);
-  }
-
-  async findEvent(eventId: string): Promise<GateEventRef | null> {
-    const [event] = await db
-      .select({ id: events.id, status: events.status, title: events.title })
-      .from(events)
-      .where(eq(events.id, eventId))
-      .limit(1);
-    return event ?? null;
-  }
-
-  async gateBelongsToEvent(gateId: string, eventId: string) {
-    const [gate] = await db
-      .select({ id: gates.id })
-      .from(gates)
-      .where(and(eq(gates.id, gateId), eq(gates.eventId, eventId)))
-      .limit(1);
-    return Boolean(gate);
-  }
-
-  async checkInIfSold(
-    ticketId: string,
-    staffUserId: string,
-    gateId: string | null,
-    now: Date,
-  ) {
-    const [updated] = await db
-      .update(tickets)
-      .set(checkInValues(staffUserId, gateId, now))
-      .where(
-        and(eq(tickets.id, ticketId), eq(tickets.status, TicketStatus.SOLD)),
-      )
-      .returning();
-    return updated ? toCheckedIn(updated) : null;
-  }
-
-  async findTicketState(ticketId: string): Promise<TicketStateRow | null> {
-    const [row] = await db
-      .select({
-        id: tickets.id,
-        status: tickets.status,
-        checkedInAt: tickets.checkedInAt,
-        checkedInBy: tickets.checkedInBy,
-      })
-      .from(tickets)
-      .where(eq(tickets.id, ticketId))
-      .limit(1);
-    return row ?? null;
-  }
-
-  async findScanDetails(ticketId: string): Promise<ScanTicketDetails | null> {
-    const [row] = await db
-      .select({
-        ticketCode: tickets.ticketCode,
-        ticketTypeName: ticketTypes.name,
-        isSeated: ticketTypes.isSeated,
-        zoneName: seats.zoneName,
-        rowLabel: seats.rowLabel,
-        seatNumber: seats.seatNumber,
-        buyerName: users.fullName,
-      })
-      .from(tickets)
-      .innerJoin(ticketTypes, eq(tickets.ticketTypeId, ticketTypes.id))
-      .innerJoin(users, eq(tickets.userId, users.id))
-      .leftJoin(seats, eq(tickets.seatId, seats.id))
-      .where(eq(tickets.id, ticketId))
-      .limit(1);
-    return row ?? null;
-  }
-
-  async findLookupTicket(
-    ticketCode: string,
-    eventId: string,
-  ): Promise<LookupTicketRow | null> {
-    const [row] = await db
-      .select({
-        id: tickets.id,
-        userId: tickets.userId,
-        status: tickets.status,
-        ticketCode: tickets.ticketCode,
-        buyerPhone: users.phone,
-        buyerEmail: users.email,
-        buyerName: users.fullName,
-        ticketTypeName: ticketTypes.name,
-        isSeated: ticketTypes.isSeated,
-        zoneName: seats.zoneName,
-        rowLabel: seats.rowLabel,
-        seatNumber: seats.seatNumber,
-      })
-      .from(tickets)
-      .innerJoin(ticketTypes, eq(tickets.ticketTypeId, ticketTypes.id))
-      .innerJoin(users, eq(tickets.userId, users.id))
-      .leftJoin(seats, eq(tickets.seatId, seats.id))
-      .where(
-        and(eq(tickets.ticketCode, ticketCode), eq(tickets.eventId, eventId)),
-      )
-      .limit(1);
-    return row ?? null;
-  }
-
-  checkInManually(input: {
-    ticketId: string;
-    staffUserId: string;
-    staffRole: string;
-    gateId: string | null;
-    now: Date;
-    audit: Record<string, unknown>;
-  }): Promise<CheckedInTicket | null> {
-    return db.transaction(async (tx) => {
-      const [updated] = await tx
-        .update(tickets)
-        .set(checkInValues(input.staffUserId, input.gateId, input.now))
-        .where(
-          and(
-            eq(tickets.id, input.ticketId),
-            eq(tickets.status, TicketStatus.SOLD),
-          ),
-        )
-        .returning();
-      if (!updated) return null;
-
-      // Ghi vet kiem toan bat buoc, cung transaction voi viec soat ve
-      await tx.insert(auditLog).values({
-        actorId: input.staffUserId,
-        actorRole: input.staffRole,
-        action: "MANUAL_TICKET_CHECK_IN",
-        targetType: "TICKET",
-        targetId: input.ticketId,
-        changes: input.audit,
-      });
-      return toCheckedIn(updated);
+  async recordInvalidQr(staffUserId: string) {
+    const actor = await db.query.users.findFirst({
+      columns: { fullName: true },
+      where: eq(users.id, staffUserId),
     });
+    await db.insert(gateCheckinLogs).values({
+      staffId: staffUserId,
+      staffName: actor?.fullName ?? null,
+      method: "QR",
+      outcome: "REJECTED",
+      errorCode: "INVALID_QR",
+    });
+  }
+
+  async checkIn(
+    staffUserId: string,
+    staffRole: string,
+    input: GateCheckInInput,
+  ): Promise<GateScanResponse> {
+    const method = input.manual ? "MANUAL" : "QR";
+    let resolvedGate: string | null = null;
+    let loggedEvent: string | null = null;
+    let foundTicket: string | null = null;
+    let staffName: string | null = null;
+    try {
+      return await db.transaction(async (tx) => {
+        const [actor] = await tx
+          .select()
+          .from(users)
+          .where(eq(users.id, staffUserId))
+          .for("share");
+        staffName = actor?.fullName ?? null;
+        if (
+          !actor ||
+          actor.status !== "ACTIVE" ||
+          actor.role !== staffRole ||
+          ![UserRole.GATE_STAFF, UserRole.ADMIN].some((r) => r === actor.role)
+        )
+          throw new TicketingDomainError(
+            "FORBIDDEN",
+            "STAFF_INACTIVE",
+            "STAFF_INACTIVE",
+          );
+        let assignedGate: string | null = null;
+        if (staffRole !== UserRole.ADMIN) {
+          const [assignment] = await tx
+            .select()
+            .from(eventStaff)
+            .where(
+              and(
+                eq(eventStaff.eventId, input.eventId),
+                eq(eventStaff.userId, staffUserId),
+              ),
+            )
+            .for("share");
+          if (!assignment)
+            throw new TicketingDomainError(
+              "FORBIDDEN",
+              "STAFF_NOT_ASSIGNED_TO_EVENT",
+              "STAFF_NOT_ASSIGNED_TO_EVENT",
+            );
+          assignedGate = assignment.gateId;
+          if (assignedGate && input.gateId && input.gateId !== assignedGate)
+            throw new TicketingDomainError(
+              "FORBIDDEN",
+              "STAFF_NOT_ASSIGNED_TO_GATE",
+              "STAFF_NOT_ASSIGNED_TO_GATE",
+            );
+        }
+        const [event] = await tx
+          .select()
+          .from(events)
+          .where(eq(events.id, input.eventId))
+          .for("share");
+        loggedEvent = event?.id ?? null;
+        if (!event || event.status !== EventStatus.PUBLISHED)
+          throw new TicketingDomainError(
+            "BAD_REQUEST",
+            "EVENT_NOT_ACTIVE",
+            "EVENT_NOT_ACTIVE",
+          );
+        resolvedGate = input.gateId ?? assignedGate;
+        if (resolvedGate) {
+          const gate = await tx.query.gates.findFirst({
+            where: and(
+              eq(gates.id, resolvedGate),
+              eq(gates.eventId, input.eventId),
+            ),
+          });
+          if (!gate) {
+            resolvedGate = null;
+            throw new TicketingDomainError(
+              "BAD_REQUEST",
+              "INVALID_GATE_ID",
+              "INVALID_GATE_ID",
+            );
+          }
+        }
+        const now = new Date();
+        if (now < event.gateOpeningTime || now > event.endTime) {
+          throw new TicketingDomainError(
+            "BAD_REQUEST",
+            "CHECKIN_OUTSIDE_EVENT_WINDOW",
+            "CHECKIN_OUTSIDE_EVENT_WINDOW",
+          );
+        }
+        const [info] = await tx
+          .select({
+            ticket: tickets,
+            buyer: users,
+            type: ticketTypes,
+            seat: seats,
+          })
+          .from(tickets)
+          .innerJoin(users, eq(users.id, tickets.userId))
+          .innerJoin(ticketTypes, eq(ticketTypes.id, tickets.ticketTypeId))
+          .leftJoin(seats, eq(seats.id, tickets.seatId))
+          .where(
+            and(
+              eq(tickets.eventId, input.eventId),
+              input.manual
+                ? eq(tickets.ticketCode, input.manual.ticketCode)
+                : eq(tickets.id, input.qr!.sub),
+            ),
+          )
+          .limit(1);
+        if (!info)
+          throw new TicketingDomainError(
+            "NOT_FOUND",
+            "TICKET_NOT_FOUND",
+            "TICKET_NOT_FOUND",
+          );
+        foundTicket = info.ticket.id;
+        if (
+          input.qr &&
+          (info.ticket.orderId !== input.qr.orderId ||
+            info.ticket.userId !== input.qr.userId)
+        )
+          throw new TicketingDomainError(
+            "BAD_REQUEST",
+            "QR_TICKET_MISMATCH",
+            "QR_TICKET_MISMATCH",
+          );
+        if (input.manual) {
+          const last4 = input.manual.phoneOrEmailLast4?.trim();
+          const phoneMatch = Boolean(
+            last4 &&
+            /^\d{4}$/.test(last4) &&
+            info.buyer.phone?.replace(/\D/g, "").slice(-4) === last4,
+          );
+          const emailMatch = Boolean(
+            input.manual.email &&
+            info.buyer.email.toLowerCase() ===
+              input.manual.email.trim().toLowerCase(),
+          );
+          const emailSuffixMatch = Boolean(
+            last4 &&
+            /^[a-z0-9]{4}$/i.test(last4) &&
+            info.buyer.email.split("@")[0]?.toLowerCase().slice(-4) ===
+              last4.toLowerCase(),
+          );
+          if (!phoneMatch && !emailMatch && !emailSuffixMatch)
+            throw new TicketingDomainError(
+              "BAD_REQUEST",
+              "VERIFICATION_FAILED",
+              "VERIFICATION_FAILED",
+            );
+        }
+        if (info.ticket.status === TicketStatus.CHECKED_IN)
+          throw alreadyCheckedIn(info.ticket);
+        if (info.ticket.status !== TicketStatus.SOLD)
+          throw input.manual
+            ? ticketingErrors.notEligible(info.ticket.status)
+            : ticketingErrors.notActive(info.ticket.status);
+        if (!resolvedGate)
+          throw new TicketingDomainError(
+            "BAD_REQUEST",
+            "GATE_REQUIRED",
+            "GATE_REQUIRED",
+          );
+        const [updated] = await tx
+          .update(tickets)
+          .set({
+            status: TicketStatus.CHECKED_IN,
+            checkedInAt: now,
+            checkedInBy: staffUserId,
+            gateId: resolvedGate,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(tickets.id, info.ticket.id),
+              eq(tickets.eventId, input.eventId),
+              eq(tickets.status, TicketStatus.SOLD),
+            ),
+          )
+          .returning();
+        if (!updated) {
+          const latest = await tx.query.tickets.findFirst({
+            columns: {
+              status: true,
+              checkedInAt: true,
+              gateId: true,
+              checkedInBy: true,
+            },
+            where: eq(tickets.id, info.ticket.id),
+          });
+          if (latest?.status === TicketStatus.CHECKED_IN)
+            throw alreadyCheckedIn(latest);
+          throw input.manual
+            ? ticketingErrors.notEligible(latest?.status ?? "UNKNOWN")
+            : ticketingErrors.notActive(latest?.status ?? "UNKNOWN");
+        }
+        const reason = input.manual?.reason ?? null;
+        await tx.insert(gateCheckinLogs).values({
+          eventId: input.eventId,
+          ticketId: updated.id,
+          gateId: resolvedGate,
+          staffId: staffUserId,
+          staffName,
+          method,
+          outcome: "SUCCESS",
+          reason,
+          checkedInAt: now,
+        });
+        await tx.insert(auditLog).values({
+          actorId: staffUserId,
+          actorRole: staffRole,
+          action: input.manual
+            ? "MANUAL_TICKET_CHECK_IN"
+            : "QR_TICKET_CHECK_IN",
+          targetType: "TICKET",
+          targetId: updated.id,
+          changes: {
+            eventId: input.eventId,
+            gateId: resolvedGate,
+            staffId: staffUserId,
+            staffName,
+            reason,
+            checkedInAt: now.toISOString(),
+            method,
+          },
+        });
+        return {
+          ticketId: updated.id,
+          ticketCode: updated.ticketCode,
+          status: updated.status,
+          eventTitle: event.title,
+          ticketTypeName: info.type.name,
+          zoneName: info.seat?.zoneName ?? undefined,
+          seatLabel:
+            info.type.isSeated && info.seat
+              ? `Hàng ${info.seat.rowLabel} - Ghế ${info.seat.seatNumber}`
+              : "GA - Fanzone (Vé đứng)",
+          isSeated: info.type.isSeated,
+          buyerName: info.buyer.fullName,
+          checkedInAt: now.toISOString(),
+          gateId: resolvedGate,
+          staffId: staffUserId,
+        };
+      });
+    } catch (error) {
+      const message =
+        error instanceof TicketingDomainError ? error.code : "CHECKIN_FAILED";
+      await db.insert(gateCheckinLogs).values({
+        eventId: loggedEvent,
+        ticketId: foundTicket,
+        gateId: resolvedGate,
+        staffId: staffUserId,
+        staffName,
+        method,
+        outcome: "REJECTED",
+        reason: input.manual?.reason ?? null,
+        errorCode: message.split(":")[0]!.slice(0, 100),
+      });
+      throw error;
+    }
   }
 }
 

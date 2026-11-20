@@ -30,13 +30,18 @@ export const GateScanResponseSchema = z.object({
 });
 export type GateScanResponse = z.infer<typeof GateScanResponseSchema>;
 
-export const GateLookupRequestSchema = z.object({
-  eventId: z.string().uuid(),
-  ticketCode: z.string().min(1),
-  phoneOrEmailLast4: z.string().length(4),
-  reason: z.string().min(1).max(500),
-  gateId: z.string().uuid().optional(),
-});
+export const GateLookupRequestSchema = z
+  .object({
+    eventId: z.string().uuid(),
+    ticketCode: z.string().min(1),
+    phoneOrEmailLast4: z.string().length(4).optional(),
+    email: z.string().trim().email().max(255).optional(),
+    reason: z.string().trim().min(1).max(500),
+    gateId: z.string().uuid().optional(),
+  })
+  .refine((value) => Boolean(value.phoneOrEmailLast4 || value.email), {
+    message: "Nhap 4 so cuoi dien thoai hoac email day du",
+  });
 export type GateLookupRequest = z.infer<typeof GateLookupRequestSchema>;
 
 export const GateLookupResponseSchema = GateScanResponseSchema.extend({

@@ -820,3 +820,73 @@ GROUP BY e.id, e.organizer_id, e.title;
 
 CREATE UNIQUE INDEX idx_mv_event_sales_id ON mv_event_sales_summary(event_id);
 ```
+
+## Bổ sung schema tuần 5
+
+### organizer_staff
+
+Sở hữu tài khoản nhân viên theo BTC, không cho BTC nhận quản lý tài khoản tùy ý chỉ bằng email/userId.
+
+| Cột          | Kiểu        | Ràng buộc                       | Ý nghĩa                  |
+| ------------ | ----------- | ------------------------------- | ------------------------ |
+| user_id      | UUID        | PK, FK users                    | Nhân viên do BTC quản lý |
+| organizer_id | UUID        | NOT NULL, FK organizer_profiles | BTC sở hữu               |
+| created_at   | TIMESTAMPTZ | NOT NULL                        | Thời điểm tạo            |
+
+### gate_checkin_logs
+
+Nhật ký append-only cho cả QR và thủ công. ID lịch sử không có FK cascade, cùng nguyên tắc với audit_log, để không sửa hoặc mất log khi tài nguyên thay đổi.
+
+| Cột           | Kiểu         | Ràng buộc | Ý nghĩa                                    |
+| ------------- | ------------ | --------- | ------------------------------------------ |
+| id            | UUID         | PK        | Mã log                                     |
+| event_id      | UUID         | NULL      | Sự kiện, null nếu QR không xác định được   |
+| ticket_id     | UUID         | NULL      | Vé đã xác định                             |
+| gate_id       | UUID         | NULL      | Cổng đã xác định                           |
+| staff_id      | UUID         | NOT NULL  | Nhân viên thực hiện                        |
+| staff_name    | TEXT         | NULL      | Tên nhân viên lúc ghi log (migration 0006) |
+| method        | VARCHAR(20)  | NOT NULL  | QR hoặc MANUAL                             |
+| outcome       | VARCHAR(20)  | NOT NULL  | SUCCESS hoặc REJECTED                      |
+| reason        | TEXT         | NULL      | Lý do tra cứu thủ công                     |
+| error_code    | VARCHAR(100) | NULL      | Mã từ chối                                 |
+| checked_in_at | TIMESTAMPTZ  | NOT NULL  | Thời điểm thao tác                         |
+
+### report_exports
+
+Hàng đợi xuất báo cáo bền vững trong PostgreSQL; dữ liệu file nằm ngoài thư mục public.
+
+| Cột           | Kiểu         | Ràng buộc                       | Ý nghĩa                            |
+| ------------- | ------------ | ------------------------------- | ---------------------------------- |
+| id            | UUID         | PK                              | Mã job                             |
+| requested_by  | UUID         | NOT NULL, FK users              | Người yêu cầu                      |
+| organizer_id  | UUID         | NOT NULL, FK organizer_profiles | BTC sở hữu                         |
+| event_id      | UUID         | NOT NULL, FK events             | Sự kiện                            |
+| format        | VARCHAR(10)  | NOT NULL                        | csv/xlsx                           |
+| status        | VARCHAR(20)  | NOT NULL                        | Trạng thái job                     |
+| attempt_id    | UUID         | NULL                            | Fencing token mỗi lần claim        |
+| file_name     | VARCHAR(100) | NULL                            | Tên file nội bộ do worker tạo      |
+| retry_count   | INTEGER      | NOT NULL                        | Số lần lỗi                         |
+| error_message | TEXT         | NULL                            | Thông báo lỗi công khai đã rút gọn |
+| next_retry_at | TIMESTAMPTZ  | NOT NULL                        | Thời điểm thử lại                  |
+| expires_at    | TIMESTAMPTZ  | NULL                            | Hạn tải file                       |
+| created_at    | TIMESTAMPTZ  | NOT NULL                        | Ngày tạo                           |
+| updated_at    | TIMESTAMPTZ  | NOT NULL                        | Ngày cập nhật/lease                |
+
+Migration 0006_w05_operations.sql tạo MV thực tế: mv_event_sales_summary và mv_event_ticket_sales. Migration tổng hợp riêng orders, refunds, tickets trước khi join, tránh nhân doanh thu khi đơn có nhiều vé hoặc nhiều refund. Worker refresh hai MV bằng CONCURRENTLY dưới advisory lock để tránh nhiều worker refresh trùng. MV không được ánh xạ thành pgTable vì chỉ đọc qua SQL tĩnh.
+
+### Mở rộng report_exports và MV báo cáo (0006)
+
+| Cột            | Kiểu        | Ràng buộc | Ý nghĩa                                                    |
+| -------------- | ----------- | --------- | ---------------------------------------------------------- |
+| from_date      | DATE        | NULL      | Ngày đầu kỳ theo giờ Việt Nam                              |
+| to_date        | DATE        | NULL      | Ngày cuối kỳ, bao gồm trọn ngày                            |
+| ticket_type_id | UUID        | NULL      | Bộ lọc hạng vé snapshot, không FK để không mất lịch sử job |
+| voucher_code   | VARCHAR(50) | NULL      | Bộ lọc mã giảm giá chuẩn hóa chữ hoa                       |
+
+CHECK report_exports_period_check yêu cầu hai ngày cùng null hoặc cùng có giá trị và from_date <= to_date.
+Migration 0006 tạo mv_event_report_daily, tổng hợp độc lập tiền thu/ngày thanh toán, hoàn/ngày hoàn tất và vé/nhóm ngày thanh toán.
+Migration 0006 tạo mv_event_report_facts theo đơn/hạng vé/ngày/loại dòng tiền, kèm thông tin người mua và voucher.
+Phân bổ giữ tổng tiền chính xác đến cent; hoàn theo vé không nhân tiền theo số vé của đơn.
+Worker refresh cả bốn MV trong cùng transaction repeatable read/advisory lock; unique index hỗ trợ CONCURRENTLY.
+MV chỉ đọc qua SQL, không ánh xạ thành pgTable. Hoàn tất file ghi outbox REPORT_EXPORT_COMPLETED trong cùng transaction;
+không thêm PII vào payload outbox, chỉ exportId.

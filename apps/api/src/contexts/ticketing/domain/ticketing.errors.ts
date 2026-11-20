@@ -10,6 +10,11 @@ export class TicketingDomainError extends Error {
     readonly kind: TicketingErrorKind,
     readonly code: string,
     message: string,
+    readonly details?: {
+      checkedInAt: string | null;
+      gateId: string | null;
+      staffId: string | null;
+    },
   ) {
     super(message);
     this.name = "TicketingDomainError";

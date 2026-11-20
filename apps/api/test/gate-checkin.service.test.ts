@@ -163,7 +163,7 @@ describe("TicketsService Gate Check-in Tests", () => {
         city: "TP. Ho Chi Minh",
         startTime,
         endTime,
-        gateOpeningTime: startTime,
+        gateOpeningTime: now,
         status: EventStatus.PUBLISHED,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })

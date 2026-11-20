@@ -225,7 +225,7 @@ describe("UC08: Dynamic Rolling QR & Gate Check-in E2E Integration Suite", () =>
         city: "Ha Noi",
         startTime,
         endTime,
-        gateOpeningTime: startTime,
+        gateOpeningTime: now,
         status: EventStatus.PUBLISHED,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
@@ -247,7 +247,7 @@ describe("UC08: Dynamic Rolling QR & Gate Check-in E2E Integration Suite", () =>
         city: "TP. Ho Chi Minh",
         startTime,
         endTime,
-        gateOpeningTime: startTime,
+        gateOpeningTime: now,
         status: EventStatus.PUBLISHED,
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })
@@ -269,7 +269,7 @@ describe("UC08: Dynamic Rolling QR & Gate Check-in E2E Integration Suite", () =>
         city: "Ha Noi",
         startTime,
         endTime,
-        gateOpeningTime: startTime,
+        gateOpeningTime: now,
         status: EventStatus.PUBLISHED, // se chuyen sang SUSPENDED trong test
         refundPolicyType: RefundPolicyType.FLEXIBLE,
       })

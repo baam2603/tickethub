@@ -20,7 +20,11 @@ export async function mapTicketingErrors<T>(
       case "FORBIDDEN":
         throw new ForbiddenException(err.message);
       case "CONFLICT":
-        throw new ConflictException(err.message);
+        throw new ConflictException(
+          err.details
+            ? { code: err.code, message: err.message, ...err.details }
+            : err.message,
+        );
       default:
         throw new BadRequestException(err.message);
     }

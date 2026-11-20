@@ -1,3 +1,4 @@
+import { OperationsModule } from "./contexts/operations/operations.module";
 import { Module } from "@nestjs/common";
 import { RedisModule } from "./database/redis.module";
 import { HealthModule } from "./health/health.module";
@@ -17,6 +18,7 @@ import { PayoutModule } from "./contexts/payout/payout.module";
     RedisModule,
     HealthModule,
     IdentityModule,
+    OperationsModule,
     EventModule,
     BookingModule,
     PaymentModule,
