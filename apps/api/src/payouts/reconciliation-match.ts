@@ -47,6 +47,24 @@ export function matchReconciliation(
     localPayments.set(payment.orderId, entries);
   }
 
+  for (const payment of ledger.payments) {
+    if (payment.status === "SUCCESS" || !payment.providerSuccessEvidence)
+      continue;
+    const order = orders.get(payment.orderId)!;
+    const gateway = paymentRows.get(payment.ref);
+    if (gateway) consumed.add(gateway);
+    items.push({
+      ...base,
+      orderId: order.id,
+      orderCode: order.code,
+      transactionRef: payment.ref,
+      providerTxNumber: payment.number,
+      gatewayAmount: gateway?.amount ?? null,
+      reconciliationStatus: ReconciliationStatus.MISSING_TRANSACTION,
+      issue: "VERIFIED_PAYMENT_NOT_SETTLED",
+    });
+  }
+
   const providerNumbers = new Set<string>();
   for (const order of ledger.eventOrders) {
     const payments = localPayments.get(order.id) ?? [];

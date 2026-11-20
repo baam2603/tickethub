@@ -57,6 +57,9 @@ async function main() {
       paymentSignal("vnpay.reconciliation.discrepancy", "warning", {
         eventId: result.eventId,
         discrepancyCount: result.discrepancyCount,
+        ...(result.investigationId
+          ? { investigationId: result.investigationId }
+          : {}),
       });
     process.exitCode = 2;
   }

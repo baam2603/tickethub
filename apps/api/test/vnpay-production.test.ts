@@ -56,6 +56,20 @@ describe("VNPay production policy", () => {
       }).success,
       false,
     );
+    assert.equal(
+      EnvSchema.safeParse({
+        ...configured,
+        SENTRY_DSN: "https://sentry.example.com/1",
+      }).success,
+      false,
+    );
+    assert.equal(
+      EnvSchema.safeParse({
+        ...configured,
+        SENTRY_DSN: "https://testkey@sentry.example.com/1",
+      }).success,
+      true,
+    );
     const list = parseIpAllowlist(configured.VNPAY_IPN_ALLOWED_CIDRS);
     assert.equal(isAllowedIp(list, "::ffff:192.0.2.9"), true);
     assert.equal(isAllowedIp(list, "2001:db8::1"), true);

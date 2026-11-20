@@ -929,3 +929,36 @@ Migration 0006 lưu kết quả đối soát VNPay gần nhất theo sự kiện
 | discrepancy_count | INTEGER     | NOT NULL           | Số dòng cần điều tra                                           |
 | items             | JSONB       | NOT NULL           | Các dòng đã phân loại, số tiền nội bộ và VNPay, lý do sai lệch |
 | reconciled_at     | TIMESTAMPTZ | NOT NULL           | Thời điểm đối soát                                             |
+
+### reconciliation_cases
+
+Mỗi lần nhập báo cáo có sai lệch tạo một phiếu. Bản nhập lặp của cùng kết quả dùng lại phiếu. Migration 0007 lưu bằng chứng JSONB độc lập với báo cáo gần nhất và tạo phiếu cho báo cáo lệch còn lưu trước nâng cấp.
+
+| Cột           | Kiểu        | Mô tả                           |
+| ------------- | ----------- | ------------------------------- |
+| id            | UUID        | Khóa chính                      |
+| event_id      | UUID        | Sự kiện                         |
+| source_hash   | VARCHAR(64) | SHA-256 của báo cáo nguồn       |
+| discrepancies | JSONB       | Bằng chứng sai lệch đã lưu      |
+| opened_at     | TIMESTAMPTZ | Thời điểm mở                    |
+| resolved_at   | TIMESTAMPTZ | Thời điểm đóng, null khi còn mở |
+| resolved_by   | UUID        | Admin đóng phiếu                |
+| resolution    | TEXT        | Kết luận điều tra               |
+
+### admin_settlement_exports
+
+Hàng đợi xuất CSV và Excel của Admin, xử lý bởi report worker. Migration 0007 tạo bảng này.
+
+| Cột          | Kiểu        | Mô tả                                |
+| ------------ | ----------- | ------------------------------------ |
+| id           | UUID        | Khóa chính                           |
+| requested_by | UUID        | Admin tạo tác vụ                     |
+| query        | JSONB       | Bộ lọc và định dạng                  |
+| status       | VARCHAR(20) | Trạng thái tác vụ                    |
+| attempts     | INTEGER     | Số lần nhận xử lý                    |
+| claim        | UUID        | Mã lease                             |
+| available_at | TIMESTAMPTZ | Thời điểm nhận hoặc nhận lại         |
+| expires_at   | TIMESTAMPTZ | Hạn truy cập nội dung                |
+| created_at   | TIMESTAMPTZ | Thời điểm tạo                        |
+| error_code   | VARCHAR(80) | Mã lỗi                               |
+| content      | TEXT        | Nội dung tệp base64, dọn khi hết hạn |

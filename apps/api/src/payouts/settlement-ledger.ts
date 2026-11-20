@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { ConflictException, NotFoundException } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../database/db";
 import { events, orders, refunds, transactions } from "../database/schema";
 import { calculatePayout } from "./payout-calculator";
@@ -65,6 +65,9 @@ export async function readSettlementLedger(
       status: transactions.status,
       bankCode: transactions.bankCode,
       payDate: transactions.payDate,
+      providerSuccessEvidence: sql<boolean>`coalesce(
+        ${transactions.rawCallback}->>'vnp_ResponseCode' = '00' AND
+        ${transactions.rawCallback}->>'vnp_TransactionStatus' = '00', false)`,
     })
     .from(transactions)
     .innerJoin(orders, eq(orders.id, transactions.orderId))

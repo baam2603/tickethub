@@ -1050,6 +1050,18 @@ Truy vấn danh sách lịch sử kiểm toán bất biến theo sự kiện ph�
 - Response 200 gồm `items`, `meta`, `summary` trước lọc trạng thái và `report` khi lọc theo sự kiện đã đối soát. `report` chứa `sourceHash`, `reconciledAt` và `discrepancyCount`.
 - Mỗi dòng có `kind` (`PAYMENT` hoặc `REFUND`), `gatewayAmount` và `issue`. Mã `issue` phân biệt lỗi số tiền, mã giao dịch, trạng thái, thiếu dòng hoặc trùng dòng. Báo cáo phản ánh thời điểm nhập và điều kiện duyệt được kiểm tra lại trên dữ liệu hiện tại.
 
+#### `GET /api/v1/admin/reconciliations/:eventId/investigations`
+
+Liệt kê phiếu điều tra theo sự kiện, có `page` và `limit`. Mỗi phiếu giữ mã băm báo cáo, số chênh lệch, thời điểm mở, thời điểm đóng, Admin xử lý và lý do.
+
+#### `GET /api/v1/admin/reconciliations/:eventId/investigations/:caseId`
+
+Đọc các dòng bằng chứng đã lưu, có `page` và `limit`. Bằng chứng vẫn truy cập được sau khi nhập báo cáo mới.
+
+#### `POST /api/v1/admin/reconciliations/:eventId/investigations/resolve`
+
+Đóng các phiếu đang mở sau khi có báo cáo sạch khớp với dữ liệu hiện tại. Body có `reason` từ 1 đến 500 ký tự. Trả 200 và `resolvedCount`, hoặc 409 nếu báo cáo còn sai lệch hoặc đã cũ. Admin gỡ `HOLD` ở endpoint payout sau bước này.
+
 #### `POST /api/v1/admin/events/:id/end`
 
 Chốt sự kiện `PUBLISHED` đã qua giờ kết thúc để đối soát. Endpoint yêu cầu ADMIN, chuyển trạng thái thành `ENDED` và ghi audit. Gọi lại với sự kiện `ENDED` trả kết quả cũ. Trả 409 cho sự kiện chưa đủ điều kiện.
@@ -1060,8 +1072,20 @@ Tổng hợp dòng tiền toàn hệ thống từ dữ liệu báo cáo W05. Hai
 
 - Header `Authorization: Bearer <adminToken>`
 - Query params `fromDate` và `toDate` theo ISO, phạm vi tối đa 366 ngày. `groupBy` nhận `day`, `category`, `city`, `organizer` hoặc `provider`. Bộ lọc tùy chọn gồm `category`, `city`, `organizerId` và `provider` (`VNPAY` hoặc `UNATTRIBUTED`).
-- `format=json` trả số tiền dưới dạng chuỗi thập phân. `format=csv` trả tệp tải xuống. Khi vượt 10.000 nhóm, API trả 422 để thu hẹp bộ lọc.
+- `format=json` trả số tiền dưới dạng chuỗi thập phân. `format=csv` trả tệp tải xuống. `format=xlsx` tải Excel. Khi vượt 10.000 nhóm hoặc truy vấn quá 5 giây, API trả 422 `REPORT_REQUIRES_BACKGROUND_EXPORT`.
 - `netRevenue` là tiền thu sau hoàn. Phí và tiền thực chi xem tại API payouts.
+
+#### `POST /api/v1/admin/settlement-report/exports`
+
+Tạo tác vụ export chạy nền, dùng cùng bộ lọc với báo cáo trực tiếp và `format=csv` hoặc `xlsx`. Trả 202, tối đa ba tác vụ đang xử lý hoặc chờ mỗi Admin.
+
+#### `GET /api/v1/admin/settlement-report/exports`
+
+Liệt kê tác vụ của Admin hiện tại, có `page` và `limit`. Worker hỗ trợ tối đa 100.000 nhóm và tệp tối đa 12 MiB. Trong vòng 24 giờ sau khi hoàn tất có thể tải file.
+
+#### `GET /api/v1/admin/settlement-report/exports/:id/download`
+
+Tải tệp qua xác thực Admin và quyền sở hữu tác vụ. Trả 409 khi chưa hoàn tất, 410 nếu đã hết hạn và bản ghi còn tồn tại, 404 nếu không có tác vụ trong phạm vi hoặc worker đã dọn. Tệp có `Cache-Control: private, no-store`.
 
 #### `GET /api/v1/admin/payouts`
 
@@ -1081,7 +1105,7 @@ Tính quyết toán cho sự kiện `ENDED` hoặc `CANCELLED`. Doanh thu lấy 
 
 #### `POST /api/v1/admin/payouts/:id/approve`
 
-Xác nhận chi trả mô phỏng. Lệnh phải ở `PENDING`, kết quả đối soát còn khớp với dữ liệu hiện tại và số tiền đã được tính lại. Trả 409 khi điều kiện chưa đạt.
+Xác nhận chi trả mô phỏng. Lệnh phải ở `PENDING`, kết quả đối soát còn khớp với dữ liệu hiện tại, các phiếu điều tra đã đóng và số tiền đã được tính lại. Trả 409 khi điều kiện chưa đạt. Với lỗi PostgreSQL xác nhận rollback, API thử lại tối đa ba lần và phát cảnh báo khi hết lượt.
 
 - Header: `Authorization: Bearer <adminToken>`
 - Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT` và ghi vết kiểm toán vào `audit_log`.

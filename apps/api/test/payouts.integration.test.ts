@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import assert from "node:assert/strict";
+import ExcelJS from "exceljs";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { Module } from "@nestjs/common";
@@ -13,12 +14,14 @@ import { and, eq, inArray } from "drizzle-orm";
 import { env } from "../src/config/env.config";
 import { db, sqlClient } from "../src/database/db";
 import {
+  adminSettlementExports,
   auditLog,
   events,
   orders,
   organizerProfiles,
   payouts,
   reconciliationReports,
+  reconciliationCases,
   refunds,
   transactions,
   users,
@@ -27,6 +30,8 @@ import { AdminPayoutsController } from "../src/payouts/admin-payouts.controller"
 import { OrganizerPayoutsController } from "../src/payouts/organizer-payouts.controller";
 import { PayoutsService } from "../src/payouts/payouts.service";
 import { ReconciliationsService } from "../src/payouts/reconciliations.service";
+import { processAdminSettlementExport } from "../src/reporting/admin-settlement-exports";
+import { retryPayoutApproval } from "../src/payouts/approval-retry";
 import { refreshReportViews } from "../src/reporting/report-data";
 
 const jwt = new JwtService({ secret: env.JWT_SECRET });
@@ -216,6 +221,9 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
           ]),
         );
       await db
+        .delete(reconciliationCases)
+        .where(inArray(reconciliationCases.eventId, createdEvents));
+      await db
         .delete(reconciliationReports)
         .where(inArray(reconciliationReports.eventId, createdEvents));
       if (orderId) {
@@ -229,8 +237,12 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
       await db
         .delete(organizerProfiles)
         .where(inArray(organizerProfiles.id, createdProfiles));
-    if (createdUsers.length)
+    if (createdUsers.length) {
+      await db
+        .delete(adminSettlementExports)
+        .where(inArray(adminSettlementExports.requestedBy, createdUsers));
       await db.delete(users).where(inArray(users.id, createdUsers));
+    }
     if (createdEvents.length) await refreshReportViews();
     await sqlClient.end();
   });
@@ -284,13 +296,21 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
       `${paymentRef},${paymentNumber},9000000,01`,
       "ORPHAN,998,100000,01",
     );
+    const imported = await reconciliation.importReport(eventId, mismatch);
+    assert.equal(imported.discrepancyCount, 3);
+    assert.ok(imported.investigationId);
+    const repeated = await reconciliation.importReport(eventId, mismatch);
+    assert.equal(repeated.reused, true);
+    assert.equal(repeated.investigationId, imported.investigationId);
+    const root = `/admin/reconciliations/${eventId}/investigations`;
     assert.equal(
-      (await reconciliation.importReport(eventId, mismatch)).discrepancyCount,
-      3,
-    );
-    assert.equal(
-      (await reconciliation.importReport(eventId, mismatch)).reused,
-      true,
+      (
+        await http(root + "/resolve", {
+          method: "POST",
+          body: { reason: "Chưa sạch" },
+        })
+      ).status,
+      409,
     );
     await assert.rejects(
       reconciliation.importReport(eventId, csv("INVALID,12,0,01")),
@@ -323,6 +343,25 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
       (await reconciliation.importReport(eventId, report)).discrepancyCount,
       0,
     );
+    const history = await http(root);
+    assert.equal((await history.json()).data.items.length, 1);
+    const evidence = await http(
+      root + "/" + imported.investigationId + "?limit=1",
+    );
+    const details = (await evidence.json()).data;
+    assert.equal(details.items.length, 1);
+    assert.equal(details.meta.hasMore, true);
+    const blocked = await http(`/admin/payouts/${payout.id}/release`, {
+      method: "POST",
+      body: { reason: "Thiếu kết luận điều tra" },
+    });
+    assert.equal(blocked.status, 409);
+    const resolved = await http(root + "/resolve", {
+      method: "POST",
+      body: { reason: "Đã xác minh báo cáo sửa" },
+    });
+    assert.equal(resolved.status, 200);
+    assert.equal((await resolved.json()).data.resolvedCount, 1);
     const released = await http(`/admin/payouts/${payout.id}/release`, {
       method: "POST",
       body: { reason: "Đã rà soát báo cáo VNPay" },
@@ -339,6 +378,17 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
       reason: "New refund",
       idempotencyKey: randomUUID(),
     });
+    const [pendingPayment] = await db
+      .insert(transactions)
+      .values({
+        orderId,
+        amount: "100000",
+        status: "PENDING",
+        transactionRef: "BE2" + randomUUID().replaceAll("-", ""),
+        idempotencyKey: randomUUID(),
+        rawCallback: { vnp_ResponseCode: "00", vnp_TransactionStatus: "00" },
+      })
+      .returning({ id: transactions.id });
     const listing = await http(`/admin/payouts?eventId=${eventId}`);
     const { data } = await listing.json();
     const payout = data.items[0];
@@ -349,8 +399,20 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
     );
     assert.equal(
       (await reconciliation.importReport(eventId, report)).discrepancyCount,
-      1,
+      2,
     );
+    const pendingReport = await http(
+      `/admin/reconciliations?eventId=${eventId}&status=MISSING_TRANSACTION`,
+    );
+    assert.ok(
+      (await pendingReport.json()).data.items.some(
+        (row: { issue: string }) =>
+          row.issue === "VERIFIED_PAYMENT_NOT_SETTLED",
+      ),
+    );
+    await db
+      .delete(transactions)
+      .where(eq(transactions.id, pendingPayment!.id));
     await db
       .delete(refunds)
       .where(and(eq(refunds.status, "PENDING"), eq(refunds.orderId, orderId)));
@@ -358,6 +420,14 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
       (await reconciliation.importReport(eventId, report)).discrepancyCount,
       0,
     );
+    const resolved = await http(
+      `/admin/reconciliations/${eventId}/investigations/resolve`,
+      {
+        method: "POST",
+        body: { reason: "Đã xác minh giao dịch và hoàn tiền" },
+      },
+    );
+    assert.equal(resolved.status, 200);
     assert.equal(
       (
         await http(`/admin/payouts/${payout.id}/release`, {
@@ -451,5 +521,73 @@ describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
     assert.equal(exported.status, 200);
     assert.match(exported.headers.get("content-type") ?? "", /^text\/csv/);
     assert.match(await exported.text(), /"'\+UC11",100000/);
+  });
+  it("tạo Excel nền, chỉ người tạo được tải và từ chối ADMIN đã khóa", async () => {
+    const date = new Date(now.getTime() + 7 * 3_600_000)
+      .toISOString()
+      .slice(0, 10);
+    const root = "/admin/settlement-report/exports";
+    const created = await http(root, {
+      method: "POST",
+      body: {
+        fromDate: date,
+        toDate: date,
+        groupBy: "city",
+        city: "+UC11",
+        format: "xlsx",
+      },
+    });
+    assert.equal(created.status, 202);
+    const { data: job } = await created.json();
+    const path = `${root}/${job.id}/download`;
+    assert.equal((await http(path)).status, 409);
+    assert.deepEqual(
+      await Promise.all([
+        processAdminSettlementExport(),
+        processAdminSettlementExport(),
+      ]).then((runs) => runs.sort()),
+      [false, true],
+    );
+    const outsider = await makeUser("ADMIN");
+    assert.equal((await http(path, { actor: outsider })).status, 404);
+    const list = await http(root);
+    assert.equal((await list.json()).data.items[0].status, "COMPLETED");
+    const result = await http(path);
+    assert.equal(result.status, 200);
+    assert.match(result.headers.get("content-type") ?? "", /spreadsheetml/);
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(await result.arrayBuffer());
+    assert.equal(book.getWorksheet("UC11")!.getCell("A2").value, "+UC11");
+    assert.equal(book.getWorksheet("UC11")!.getCell("B2").value, "100000.00");
+    await db.update(users).set({ status: "LOCKED" }).where(eq(users.id, admin));
+    assert.equal((await http(path)).status, 403);
+  });
+
+  it("thử lại lỗi rollback đã xác nhận và giữ nguyên lỗi nghiệp vụ", async () => {
+    let attempts = 0;
+    const result = await retryPayoutApproval(randomUUID(), async () => {
+      if (++attempts < 3)
+        throw Object.assign(new Error("Serialization failure"), {
+          code: "40001",
+        });
+      return "OK";
+    });
+    assert.equal(result, "OK");
+    assert.equal(attempts, 3);
+    let exhausted = 0;
+    await assert.rejects(
+      retryPayoutApproval(randomUUID(), async () => {
+        exhausted++;
+        throw new Error("Write conflict", { cause: { code: "40P01" } });
+      }),
+      /PAYOUT_APPROVAL_RETRY_EXHAUSTED/,
+    );
+    assert.equal(exhausted, 3);
+    await assert.rejects(
+      retryPayoutApproval(randomUUID(), async () => {
+        throw new Error("CLEAN_CURRENT_RECONCILIATION_REQUIRED");
+      }),
+      /CLEAN_CURRENT_RECONCILIATION_REQUIRED/,
+    );
   });
 });

@@ -1,7 +1,16 @@
-import { Injectable } from "@nestjs/common";
-import { eq, sql } from "drizzle-orm";
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../database/db";
-import { auditLog, payouts, reconciliationReports } from "../database/schema";
+import {
+  auditLog,
+  payouts,
+  reconciliationCases,
+  reconciliationReports,
+} from "../database/schema";
 import type { ReconciliationQueryDto } from "@tickethub/shared";
 import type { ReconciliationItem } from "./reconciliation-items";
 import { matchReconciliation } from "./reconciliation-match";
@@ -37,16 +46,31 @@ export class ReconciliationsService {
         previous?.sourceHash === sourceHash &&
         previous.ledgerHash === ledger.ledgerHash
       ) {
+        const [investigation] =
+          previous.discrepancyCount > 0
+            ? await tx
+                .select({ id: reconciliationCases.id })
+                .from(reconciliationCases)
+                .where(
+                  and(
+                    eq(reconciliationCases.eventId, eventId),
+                    eq(reconciliationCases.sourceHash, sourceHash),
+                    eq(reconciliationCases.openedAt, previous.reconciledAt),
+                  ),
+                )
+            : [];
         return {
           eventId,
           sourceHash,
           discrepancyCount: previous.discrepancyCount,
           reconciledAt: previous.reconciledAt,
+          investigationId: investigation?.id ?? null,
           reused: true,
         };
       }
       const items = matchReconciliation(event, ledger, report);
-      const discrepancyCount = items.filter((item) => item.issue).length;
+      const discrepancies = items.filter((item) => item.issue);
+      const discrepancyCount = discrepancies.length;
       const reconciledAt = new Date();
       const values = {
         sourceHash,
@@ -62,7 +86,18 @@ export class ReconciliationsService {
           target: reconciliationReports.eventId,
           set: values,
         });
+      let investigationId: string | null = null;
       if (discrepancyCount) {
+        const [investigation] = await tx
+          .insert(reconciliationCases)
+          .values({
+            eventId,
+            sourceHash,
+            discrepancies,
+            openedAt: reconciledAt,
+          })
+          .returning({ id: reconciliationCases.id });
+        investigationId = investigation!.id;
         await tx
           .update(payouts)
           .set({
@@ -82,6 +117,7 @@ export class ReconciliationsService {
         changes: {
           sourceHash,
           discrepancyCount,
+          investigationId,
           previousSourceHash: previous?.sourceHash ?? null,
         },
       });
@@ -90,8 +126,111 @@ export class ReconciliationsService {
         sourceHash,
         discrepancyCount,
         reconciledAt,
+        investigationId,
         reused: false,
       };
+    });
+  }
+
+  async getInvestigations(eventId: string, page: number, limit: number) {
+    const cases = await db
+      .select({
+        id: reconciliationCases.id,
+        eventId: reconciliationCases.eventId,
+        sourceHash: reconciliationCases.sourceHash,
+        openedAt: reconciliationCases.openedAt,
+        resolvedAt: reconciliationCases.resolvedAt,
+        resolvedBy: reconciliationCases.resolvedBy,
+        resolution: reconciliationCases.resolution,
+        discrepancyCount: sql<number>`jsonb_array_length(${reconciliationCases.discrepancies})`,
+      })
+      .from(reconciliationCases)
+      .where(eq(reconciliationCases.eventId, eventId))
+      .orderBy(desc(reconciliationCases.openedAt), desc(reconciliationCases.id))
+      .limit(limit + 1)
+      .offset((page - 1) * limit);
+    return {
+      items: cases.slice(0, limit),
+      meta: { page, limit, hasMore: cases.length > limit },
+    };
+  }
+
+  async getInvestigationItems(
+    eventId: string,
+    caseId: string,
+    page: number,
+    limit: number,
+  ) {
+    const [investigation] = await db
+      .select({ id: reconciliationCases.id })
+      .from(reconciliationCases)
+      .where(
+        and(
+          eq(reconciliationCases.id, caseId),
+          eq(reconciliationCases.eventId, eventId),
+        ),
+      );
+    if (!investigation) throw new NotFoundException("INVESTIGATION_NOT_FOUND");
+    const items = await db.execute<{ item: ReconciliationItem }>(sql`
+      SELECT item
+      FROM reconciliation_cases
+      CROSS JOIN LATERAL jsonb_array_elements(discrepancies) WITH ORDINALITY AS evidence(item, position)
+      WHERE event_id = ${eventId} AND id = ${caseId}
+      ORDER BY position LIMIT ${limit + 1} OFFSET ${(page - 1) * limit}
+    `);
+    return {
+      items: items.slice(0, limit).map(({ item }) => item),
+      meta: { page, limit, hasMore: items.length > limit },
+    };
+  }
+
+  async resolveInvestigations(
+    eventId: string,
+    adminId: string,
+    resolution: string,
+  ) {
+    return db.transaction(async (tx) => {
+      const event = await lockSettlementEvent(tx, eventId);
+      assertSettlementClosed(event);
+      const { ledgerHash } = await readSettlementLedger(tx, eventId);
+      const [report] = await tx
+        .select({
+          ledgerHash: reconciliationReports.ledgerHash,
+          discrepancyCount: reconciliationReports.discrepancyCount,
+          sourceHash: reconciliationReports.sourceHash,
+        })
+        .from(reconciliationReports)
+        .where(eq(reconciliationReports.eventId, eventId));
+      if (report?.ledgerHash !== ledgerHash || report.discrepancyCount !== 0)
+        throw new ConflictException("CLEAN_CURRENT_RECONCILIATION_REQUIRED");
+      const closed = await tx
+        .update(reconciliationCases)
+        .set({
+          resolution,
+          resolvedBy: adminId,
+          resolvedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(reconciliationCases.eventId, eventId),
+            isNull(reconciliationCases.resolvedAt),
+          ),
+        )
+        .returning({ id: reconciliationCases.id });
+      if (closed.length)
+        await tx.insert(auditLog).values({
+          actorId: adminId,
+          actorRole: "ADMIN",
+          action: "RESOLVE_VNPAY_INVESTIGATIONS",
+          targetType: "EVENT",
+          targetId: eventId,
+          changes: {
+            caseIds: closed.map(({ id }) => id),
+            resolution,
+            sourceHash: report.sourceHash,
+          },
+        });
+      return { resolvedCount: closed.length };
     });
   }
 

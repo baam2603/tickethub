@@ -1,5 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { sqlClient } from "../database/db";
+import {
+  cleanupAdminSettlementExports,
+  processAdminSettlementExport,
+} from "../reporting/admin-settlement-exports";
 import { refreshReportViews } from "../reporting/report-data";
 import {
   cleanupReportExports,
@@ -21,8 +25,10 @@ async function main() {
       if (Date.now() - refreshed >= 300000) {
         if (await refreshReportViews()) refreshed = Date.now();
         await cleanupReportExports();
+        await cleanupAdminSettlementExports();
       }
       processed = await processReportExport();
+      processed = (await processAdminSettlementExport()) || processed;
       // Loi cau hinh/provider thong bao khong chan xu ly file tiep theo.
       try {
         processed = (await processReportNotification()) || processed;

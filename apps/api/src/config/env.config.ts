@@ -45,6 +45,11 @@ export const EnvSchema = z
     TRUSTED_PROXY_CIDRS: z.string().default(""),
     SENTRY_DSN: z
       .union([z.literal(""), z.url({ protocol: /^https$/ })])
+      .refine((dsn) => {
+        if (!dsn) return true;
+        const url = URL.parse(dsn);
+        return Boolean(url?.username && /\/\d+\/?$/.test(url.pathname));
+      }, "Expected an HTTPS Sentry DSN with public key and project ID")
       .optional(),
     ENABLE_VNPAY_IPN_PROCESSING: z.enum(["true", "false"]).default("false"),
     ENABLE_VNPAY_REFUNDS: z.enum(["true", "false"]).default("false"),

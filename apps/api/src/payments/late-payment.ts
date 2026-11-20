@@ -1,3 +1,4 @@
+import { vnpayCallbackEvidence } from "./vnpay-callback-evidence";
 import { and, asc, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import {
@@ -124,7 +125,7 @@ export async function settleLatePayment(
       providerTxNumber: params.vnp_TransactionNo!,
       payDate: parseVnpayDate(params.vnp_PayDate),
       responseCode: "00",
-      rawCallback: params,
+      rawCallback: vnpayCallbackEvidence(params),
       updatedAt: now,
     })
     .where(eq(transactions.id, payment.id));

@@ -5,10 +5,11 @@ import {
   BadRequestException,
   ForbiddenException,
 } from "@nestjs/common";
-import { and, eq, sql, desc, count } from "drizzle-orm";
+import { and, eq, isNull, sql, desc, count } from "drizzle-orm";
 import { db } from "../database/db";
 import { payouts } from "../database/schema/payouts";
 import { events } from "../database/schema/events";
+import { reconciliationCases } from "../database/schema/reconciliation-cases";
 import { reconciliationReports } from "../database/schema/reconciliation-reports";
 import { auditLog } from "../database/schema/audit-log";
 import { organizerProfiles } from "../database/schema/organizer-profiles";
@@ -25,6 +26,8 @@ import {
   type SettlementTransaction,
 } from "./settlement-ledger";
 import type { PayoutCalculationResult } from "./payout-calculator";
+
+import { retryPayoutApproval } from "./approval-retry";
 
 function payoutAmounts(calculation: PayoutCalculationResult) {
   return {
@@ -64,8 +67,20 @@ async function settlementState(tx: SettlementTransaction, eventId: string) {
     })
     .from(reconciliationReports)
     .where(eq(reconciliationReports.eventId, eventId));
+  const [openInvestigation] = await tx
+    .select({ id: reconciliationCases.id })
+    .from(reconciliationCases)
+    .where(
+      and(
+        eq(reconciliationCases.eventId, eventId),
+        isNull(reconciliationCases.resolvedAt),
+      ),
+    )
+    .limit(1);
   const verified =
-    report?.ledgerHash === ledger.ledgerHash && report.discrepancyCount === 0;
+    report?.ledgerHash === ledger.ledgerHash &&
+    report.discrepancyCount === 0 &&
+    !openInvestigation;
   return {
     amounts: payoutAmounts(ledger.calculation),
     verified,
@@ -160,52 +175,54 @@ export class PayoutsService {
     ipAddress?: string,
     userAgent?: string,
   ) {
-    return db.transaction(async (tx) => {
-      const payout = await this.lockPayout(tx, payoutId);
-      if (payout.status !== PayoutStatus.PENDING) {
-        throw new ConflictException("ONLY_PENDING_PAYOUT_CAN_BE_APPROVED");
-      }
-      const { verified, amounts, sourceHash } = await settlementState(
-        tx,
-        payout.eventId,
-      );
-      assertPayable(verified);
-      for (const key of Object.keys(amounts) as Array<keyof typeof amounts>) {
-        if (Number(payout[key]) !== Number(amounts[key])) {
-          throw new ConflictException("PAYOUT_AMOUNTS_CHANGED_RECALCULATE");
+    return retryPayoutApproval(payoutId, () =>
+      db.transaction(async (tx) => {
+        const payout = await this.lockPayout(tx, payoutId);
+        if (payout.status !== PayoutStatus.PENDING) {
+          throw new ConflictException("ONLY_PENDING_PAYOUT_CAN_BE_APPROVED");
         }
-      }
-      const now = new Date();
-      const [updated] = await tx
-        .update(payouts)
-        .set({
-          status: PayoutStatus.PAID_OUT,
-          approvedBy: adminUserId,
-          paidOutAt: now,
-          updatedAt: now,
-        })
-        .where(eq(payouts.id, payoutId))
-        .returning();
-      await tx.insert(auditLog).values({
-        actorId: adminUserId,
-        actorRole: UserRole.ADMIN,
-        action: "APPROVE_PAYOUT",
-        targetType: "PAYOUT",
-        targetId: payoutId,
-        changes: {
-          ...amounts,
-          newStatus: PayoutStatus.PAID_OUT,
-          paidOutAt: now.toISOString(),
-          sourceHash,
-        },
-        ipAddress: ipAddress ?? null,
-        userAgent: userAgent ?? null,
-      });
-      return {
-        ...serializePayout(updated!),
-        message: "Lệnh chi trả đã được phê duyệt thành công.",
-      };
-    });
+        const { verified, amounts, sourceHash } = await settlementState(
+          tx,
+          payout.eventId,
+        );
+        assertPayable(verified);
+        for (const key of Object.keys(amounts) as Array<keyof typeof amounts>) {
+          if (Number(payout[key]) !== Number(amounts[key])) {
+            throw new ConflictException("PAYOUT_AMOUNTS_CHANGED_RECALCULATE");
+          }
+        }
+        const now = new Date();
+        const [updated] = await tx
+          .update(payouts)
+          .set({
+            status: PayoutStatus.PAID_OUT,
+            approvedBy: adminUserId,
+            paidOutAt: now,
+            updatedAt: now,
+          })
+          .where(eq(payouts.id, payoutId))
+          .returning();
+        await tx.insert(auditLog).values({
+          actorId: adminUserId,
+          actorRole: UserRole.ADMIN,
+          action: "APPROVE_PAYOUT",
+          targetType: "PAYOUT",
+          targetId: payoutId,
+          changes: {
+            ...amounts,
+            newStatus: PayoutStatus.PAID_OUT,
+            paidOutAt: now.toISOString(),
+            sourceHash,
+          },
+          ipAddress: ipAddress ?? null,
+          userAgent: userAgent ?? null,
+        });
+        return {
+          ...serializePayout(updated!),
+          message: "Lệnh chi trả đã được phê duyệt thành công.",
+        };
+      }),
+    );
   }
 
   async releasePayout(payoutId: string, reason: string, adminUserId: string) {

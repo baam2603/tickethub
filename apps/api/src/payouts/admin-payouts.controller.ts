@@ -13,8 +13,10 @@ import {
   BadRequestException,
   HttpCode,
   HttpStatus,
+  StreamableFile,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { ActiveSettlementAdminGuard } from "./active-settlement-admin.guard";
 import { PayoutsService } from "./payouts.service";
 import { ReconciliationsService } from "./reconciliations.service";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
@@ -35,8 +37,35 @@ import {
 import {
   AdminSettlementReportQuery,
   readAdminSettlementReport,
-  toAdminSettlementCsv,
+  renderAdminSettlementDownload,
+  type AdminSettlementExportQuery,
 } from "../reporting/admin-settlement-report";
+
+import {
+  downloadAdminSettlementExport,
+  enqueueAdminSettlementExport,
+  listAdminSettlementExports,
+} from "../reporting/admin-settlement-exports";
+import { PageSchema } from "../organizer-operations/operations.schemas";
+
+function parsePage(input: unknown) {
+  const page = PageSchema.safeParse(input);
+  if (!page.success) throw new BadRequestException("INVALID_PAGE");
+  return page.data;
+}
+
+function settlementDownload(
+  bytes: Buffer,
+  format: AdminSettlementExportQuery["format"],
+) {
+  return new StreamableFile(bytes, {
+    type:
+      format === "csv"
+        ? "text/csv; charset=utf-8"
+        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    disposition: `attachment; filename=settlement-report.${format}`,
+  });
+}
 
 function extractAuditMeta(req: FastifyRequest) {
   const ipAddress = req.ip || null;
@@ -49,7 +78,7 @@ function extractAuditMeta(req: FastifyRequest) {
 }
 
 @Controller("api/v1/admin")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ActiveSettlementAdminGuard)
 @Roles(UserRole.ADMIN)
 export class AdminPayoutsController {
   constructor(
@@ -86,6 +115,53 @@ export class AdminPayoutsController {
     };
   }
 
+  @Get("reconciliations/:eventId/investigations")
+  async getInvestigations(
+    @Param("eventId", ParseUUIDPipe) eventId: string,
+    @Query() query: unknown,
+  ) {
+    const { page, limit } = parsePage(query);
+    const data = await this.reconciliationsService.getInvestigations(
+      eventId,
+      page,
+      limit,
+    );
+    return { success: true, data };
+  }
+
+  @Get("reconciliations/:eventId/investigations/:caseId")
+  async getInvestigationItems(
+    @Param("eventId", ParseUUIDPipe) eventId: string,
+    @Param("caseId", ParseUUIDPipe) caseId: string,
+    @Query() query: unknown,
+  ) {
+    const { page, limit } = parsePage(query);
+    const data = await this.reconciliationsService.getInvestigationItems(
+      eventId,
+      caseId,
+      page,
+      limit,
+    );
+    return { success: true, data };
+  }
+
+  @Post("reconciliations/:eventId/investigations/resolve")
+  @HttpCode(HttpStatus.OK)
+  async resolveInvestigations(
+    @Param("eventId", ParseUUIDPipe) eventId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: unknown,
+  ) {
+    const parsed = HoldPayoutSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException("INVALID_RESOLUTION");
+    const data = await this.reconciliationsService.resolveInvestigations(
+      eventId,
+      user.userId,
+      parsed.data.reason,
+    );
+    return { success: true, data };
+  }
+
   @Get("settlement-report")
   async getSettlementReport(
     @Query() query: unknown,
@@ -95,14 +171,12 @@ export class AdminPayoutsController {
     if (!parsed.success)
       throw new BadRequestException("INVALID_SETTLEMENT_REPORT_QUERY");
     const items = await readAdminSettlementReport(parsed.data);
-    if (parsed.data.format === "csv") {
-      reply
-        .type("text/csv; charset=utf-8")
-        .header(
-          "Content-Disposition",
-          "attachment; filename=settlement-report.csv",
-        );
-      return toAdminSettlementCsv(items);
+    if (parsed.data.format !== "json") {
+      reply.header("Cache-Control", "private, no-store");
+      return settlementDownload(
+        await renderAdminSettlementDownload(items, parsed.data.format),
+        parsed.data.format,
+      );
     }
     return {
       success: true,
@@ -112,6 +186,46 @@ export class AdminPayoutsController {
         timezone: "Asia/Ho_Chi_Minh",
       },
     };
+  }
+
+  @Post("settlement-report/exports")
+  @HttpCode(HttpStatus.ACCEPTED)
+  async createSettlementExport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: unknown,
+  ) {
+    const parsed = AdminSettlementReportQuery.safeParse(body);
+    if (!parsed.success || parsed.data.format === "json")
+      throw new BadRequestException("CSV_OR_XLSX_EXPORT_REQUIRED");
+    const data = await enqueueAdminSettlementExport(user.userId, {
+      ...parsed.data,
+      format: parsed.data.format,
+    });
+    return { success: true, data };
+  }
+
+  @Get("settlement-report/exports")
+  async listSettlementExports(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: unknown,
+  ) {
+    const { page, limit } = parsePage(query);
+    const data = await listAdminSettlementExports(user.userId, page, limit);
+    return { success: true, data };
+  }
+
+  @Get("settlement-report/exports/:id/download")
+  async downloadSettlementExport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const { bytes, format } = await downloadAdminSettlementExport(
+      user.userId,
+      id,
+    );
+    reply.header("Cache-Control", "private, no-store");
+    return settlementDownload(bytes, format);
   }
 
   @Post("events/:id/end")

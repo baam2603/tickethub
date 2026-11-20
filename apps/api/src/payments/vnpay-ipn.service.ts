@@ -1,3 +1,4 @@
+import { vnpayCallbackEvidence } from "./vnpay-callback-evidence";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { and, eq, gte, sql, inArray } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
@@ -184,15 +185,7 @@ export class VnpayIpnService {
           if (!existingAudit) {
             // Chi luu nhung truong callback can doi soat.
             // Khong luu merchant secret.
-            const callbackEvidence = {
-              vnp_TxnRef: params.vnp_TxnRef ?? null,
-              vnp_Amount: params.vnp_Amount ?? null,
-              vnp_ResponseCode: params.vnp_ResponseCode ?? null,
-              vnp_TransactionStatus: params.vnp_TransactionStatus ?? null,
-              vnp_TransactionNo: params.vnp_TransactionNo ?? null,
-              vnp_PayDate: params.vnp_PayDate ?? null,
-              vnp_BankCode: params.vnp_BankCode ?? null,
-            };
+            const callbackEvidence = vnpayCallbackEvidence(params);
 
             await tx
               .update(transactions)
@@ -334,7 +327,7 @@ export class VnpayIpnService {
           providerTxNumber: verified.providerTransactionId ?? null,
           bankCode: params.vnp_BankCode ?? null,
           payDate: parseVnpayDate(params.vnp_PayDate),
-          rawCallback: params,
+          rawCallback: vnpayCallbackEvidence(params),
           updatedAt: now,
         })
         .where(eq(transactions.id, transaction.id));
