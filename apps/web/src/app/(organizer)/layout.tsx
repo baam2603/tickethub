@@ -27,7 +27,7 @@ export default function OrganizerLayout({
               •
             </span>
             <Link
-              href="/privacy"
+              href="/faq?tab=privacy"
               className="hover:text-foreground transition-colors"
             >
               Chính sách bảo mật
@@ -36,7 +36,7 @@ export default function OrganizerLayout({
               •
             </span>
             <Link
-              href="/support"
+              href="/faq"
               className="hover:text-foreground transition-colors"
             >
               Trung tâm hỗ trợ

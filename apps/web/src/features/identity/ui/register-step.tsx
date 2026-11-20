@@ -288,7 +288,7 @@ export function RegisterStep({ flow }: { flow: AuthFlow }) {
           <p className="text-xs text-muted-foreground text-center leading-relaxed">
             Bằng việc tiếp tục, bạn đồng ý với{" "}
             <Link
-              href="/terms"
+              href="/faq?tab=terms"
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary font-semibold hover:underline"
@@ -297,7 +297,7 @@ export function RegisterStep({ flow }: { flow: AuthFlow }) {
             </Link>{" "}
             và{" "}
             <Link
-              href="/privacy"
+              href="/faq?tab=privacy"
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary font-semibold hover:underline"

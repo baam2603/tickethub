@@ -11,27 +11,24 @@ export function CheckoutFooter() {
         {/* Left: Legal Links */}
         <div className="flex items-center gap-4 sm:gap-6 flex-wrap justify-center md:justify-start">
           <Link
-            href="/terms"
+            href="/faq?tab=terms"
             className="hover:text-foreground transition-colors"
           >
             Điều khoản sử dụng
           </Link>
           <Link
-            href="/privacy"
+            href="/faq?tab=privacy"
             className="hover:text-foreground transition-colors"
           >
             Chính sách bảo mật
           </Link>
           <Link
-            href="/guarantee"
+            href="/faq?tab=refund"
             className="hover:text-foreground transition-colors"
           >
             Cam kết bảo vệ vé 100%
           </Link>
-          <Link
-            href="/help"
-            className="hover:text-foreground transition-colors"
-          >
+          <Link href="/faq" className="hover:text-foreground transition-colors">
             Trợ giúp
           </Link>
         </div>

@@ -112,7 +112,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
               <ul className="space-y-2 text-[#2b343a]">
                 <li>
                   <Link
-                    href="/my-tickets"
+                    href="/faq"
                     className="hover:text-primary transition-colors"
                   >
                     Trung tâm trợ giúp
@@ -128,10 +128,18 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
                 </li>
                 <li>
                   <Link
-                    href="/login"
+                    href="/faq?tab=refund"
                     className="hover:text-primary transition-colors"
                   >
                     Chính sách hoàn tiền
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/guide"
+                    className="hover:text-primary transition-colors"
+                  >
+                    Hướng dẫn sử dụng
                   </Link>
                 </li>
               </ul>
@@ -180,15 +188,24 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
           <div className="pt-6 border-t border-[#dfe3e5] text-[11.5px] text-[#606970] leading-relaxed">
             © 2026 tickethub Vietnam. Việc sử dụng trang web này đồng nghĩa với
             việc bạn đồng ý với{" "}
-            <Link href="/login" className="underline hover:text-[#141d23]">
+            <Link
+              href="/faq?tab=terms"
+              className="underline hover:text-[#141d23]"
+            >
               Điều khoản sử dụng
             </Link>
             ,{" "}
-            <Link href="/login" className="underline hover:text-[#141d23]">
+            <Link
+              href="/faq?tab=privacy"
+              className="underline hover:text-[#141d23]"
+            >
               Chính sách bảo mật
             </Link>{" "}
             và{" "}
-            <Link href="/login" className="underline hover:text-[#141d23]">
+            <Link
+              href="/faq?tab=refund"
+              className="underline hover:text-[#141d23]"
+            >
               Chính sách hoàn tiền
             </Link>{" "}
             của chúng tôi.

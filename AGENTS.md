@@ -163,9 +163,9 @@ Tài liệu này là Hiến chương Dự án bất biến (Immutable Project Co
 
 ---
 
-## 2. Bản Đồ 19 Trang Giao Diện Toàn Hệ Thống (Frontend Routing Map)
+## 2. Bản Đồ 21 Trang Giao Diện Toàn Hệ Thống (Frontend Routing Map)
 
-Toàn bộ ứng dụng giao diện TicketHub được cấu trúc chính xác thành 19 trang thuộc 5 phân hệ người dùng:
+Toàn bộ ứng dụng giao diện TicketHub được cấu trúc chính xác thành 21 trang thuộc 6 phân hệ:
 
 ### Phân Hệ 1: Khách Mua Vé (Buyer Experience - 7 Trang)
 
@@ -200,6 +200,11 @@ Toàn bộ ứng dụng giao diện TicketHub được cấu trúc chính xác t
 17. `/admin/dashboard` : Bảng điều khiển trung tâm toàn nền tảng, các chỉ số giao dịch và cảnh báo hệ thống.
 18. `/admin/moderation` : Trung tâm kiểm duyệt 2 lớp (Duyệt hồ sơ pháp lý Ban tổ chức KYC và Phê duyệt sự kiện mở bán).
 19. `/admin/events/[id]/control` : Bảng điều khiển khẩn cấp sự kiện, vận hành Kill Switch và tra cứu nhật ký Audit Log.
+
+### Phân Hệ 6: Trung Tâm Hỗ Trợ Công Khai (Public Support - 2 Trang)
+
+20. `/faq` : Câu hỏi thường gặp, điều khoản sử dụng, chính sách bảo mật và chính sách hoàn vé, viết bằng ngôn ngữ đời thường.
+21. `/guide` : Hướng dẫn sử dụng từng bước cho người mua vé, Ban tổ chức và Nhân viên soát vé.
 
 ---
 

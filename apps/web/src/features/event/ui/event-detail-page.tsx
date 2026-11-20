@@ -229,7 +229,14 @@ export async function EventDetailPage({ id }: { id: string }) {
               </li>
               <li>
                 Chính sách hủy và hoàn vé do Ban tổ chức quy định cho từng sự
-                kiện. Sự kiện bị hủy sẽ được hoàn tiền đầy đủ.
+                kiện. Sự kiện bị hủy sẽ được hoàn tiền đầy đủ.{" "}
+                <Link
+                  href="/faq?tab=refund"
+                  className="text-primary font-semibold hover:underline"
+                >
+                  Xem chính sách hoàn vé
+                </Link>
+                .
               </li>
             </ul>
           </section>
