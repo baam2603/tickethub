@@ -14,7 +14,9 @@ test.describe("UC07: Tạo sự kiện, Sơ đồ ghế & Hạng vé (Organizer)
   test("TC01 - Hiển thị giao diện tạo sự kiện (Wizard)", async ({ page }) => {
     await page.goto("/organizer/events/new");
     await expect(page).toHaveURL("/organizer/events/new");
-    await expect(page.locator("h1")).toContainText(/tạo sự kiện/i);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Tạo sự kiện", exact: true }),
+    ).toBeVisible();
   });
 
   test("TC02 - Cấu hình Sơ đồ ghế & Thêm Hạng vé", async () => {
