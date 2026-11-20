@@ -75,9 +75,7 @@ export async function EventDetailPage({ id }: { id: string }) {
           src={event.image}
           alt=""
           fill
-          unoptimized
-          priority
-          sizes="100vw"
+          sizes="320px"
           className="object-cover opacity-30 blur-sm scale-105"
         />
         <div className="relative max-w-[1200px] mx-auto px-4 sm:px-6 pt-24 pb-8 sm:pt-28 sm:pb-12">
@@ -93,8 +91,8 @@ export async function EventDetailPage({ id }: { id: string }) {
                 src={event.image}
                 alt={`Poster ${event.title}`}
                 fill
-                unoptimized
-                priority
+                fetchPriority="high"
+                loading="eager"
                 sizes="(max-width: 768px) 100vw, 45vw"
                 className="object-cover"
               />

@@ -26,6 +26,7 @@ export function getAccessToken(): string | null {
 export interface ApiStandardResponse<T> {
   success: boolean;
   data: T;
+  message?: string;
   error?: {
     code: string;
     message: string;
@@ -150,7 +151,9 @@ export async function apiClient<T>(
     throw new ApiError(
       response.status,
       payload?.error?.code || "UNKNOWN_ERROR",
-      payload?.error?.message || "Không thể xử lý yêu cầu từ máy chủ tickethub",
+      payload?.error?.message ||
+        (typeof payload?.message === "string" && payload.message) ||
+        "Không thể xử lý yêu cầu từ máy chủ tickethub",
       payload?.error?.details,
     );
   }

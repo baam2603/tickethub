@@ -1,22 +1,7 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
-import { QueryProvider } from "@/shared/providers/query-provider";
+import "./fonts.css";
 import { SessionProvider } from "@/features/identity";
 import "./globals.css";
-
-const inter = Inter({
-  variable: "--font-sans",
-  subsets: ["latin", "vietnamese"],
-  weight: ["400", "500", "600", "700", "800"],
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-mono",
-  subsets: ["latin", "vietnamese"],
-  weight: ["500", "600", "700"],
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Mua vé hòa nhạc, thể thao và sân khấu trên tickethub!",
@@ -30,18 +15,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="vi"
-      className={`${inter.variable} ${jetbrainsMono.variable}`}
-      suppressHydrationWarning
-    >
+    <html lang="vi" suppressHydrationWarning>
       <body
         className="min-h-screen bg-white text-[#141d23] font-sans antialiased selection:bg-emerald-500/15 selection:text-emerald-700"
         suppressHydrationWarning
       >
-        <QueryProvider>
-          <SessionProvider>{children}</SessionProvider>
-        </QueryProvider>
+        <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
   );

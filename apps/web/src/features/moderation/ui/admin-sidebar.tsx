@@ -1,169 +1,90 @@
 "use client";
 
-import { Suspense } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { Building2, CalendarCheck, FileText, Home, LogOut } from "lucide-react";
-import { Logo } from "@/shared/ui/logo";
-import { useSession } from "@/features/identity";
+import { usePathname, useRouter } from "next/navigation";
 import {
-  getAdminAuditLogs,
-  getAdminOrganizers,
-  getAdminPendingEvents,
-} from "../api/moderation-api";
+  ClipboardCheck,
+  Home,
+  LogOut,
+  ShieldAlert,
+  Wallet,
+} from "lucide-react";
+import { useSession } from "@/features/identity";
+import { Logo } from "@/shared/ui/logo";
+import { Button } from "@/shared/ui/button";
 
-export type AdminView = "organizers" | "events" | "audit";
+const links = [
+  { href: "/admin/moderation", label: "Kiểm duyệt", Icon: ClipboardCheck },
+  {
+    href: "/admin/events/control",
+    label: "Điều khiển sự kiện",
+    Icon: ShieldAlert,
+  },
+  { href: "/admin/dashboard", label: "Đối soát và chi trả", Icon: Wallet },
+];
 
-export function parseAdminView(value: string | null): AdminView {
-  return value === "events" || value === "audit" ? value : "organizers";
-}
-
-function SidebarInner() {
+export function AdminSidebar() {
+  const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useSession();
-  const view = parseAdminView(useSearchParams().get("view"));
-
-  const { data: organizers = [] } = useQuery({
-    queryKey: ["adminOrganizers"],
-    queryFn: getAdminOrganizers,
-  });
-  const { data: events = [] } = useQuery({
-    queryKey: ["adminPendingEvents"],
-    queryFn: getAdminPendingEvents,
-  });
-  const { data: auditLogs = [] } = useQuery({
-    queryKey: ["adminAuditLogs"],
-    queryFn: getAdminAuditLogs,
-  });
-
-  const pendingOrgs = organizers.filter(
-    (o) => o.status === "PENDING_VERIFICATION",
-  ).length;
-  const pendingEvents = events.filter(
-    (e) => e.status === "PENDING_APPROVAL",
-  ).length;
-
-  const items: {
-    key: AdminView;
-    label: string;
-    icon: typeof Building2;
-    count: number;
-    urgent: boolean;
-  }[] = [
-    {
-      key: "organizers",
-      label: "Hồ sơ BTC",
-      icon: Building2,
-      count: pendingOrgs,
-      urgent: true,
-    },
-    {
-      key: "events",
-      label: "Sự kiện chờ duyệt",
-      icon: CalendarCheck,
-      count: pendingEvents,
-      urgent: true,
-    },
-    {
-      key: "audit",
-      label: "Nhật ký kiểm toán",
-      icon: FileText,
-      count: auditLogs.length,
-      urgent: false,
-    },
-  ];
 
   return (
-    <aside className="w-56 shrink-0 border-r border-border bg-background flex flex-col">
-      <div className="h-12 px-3 flex items-center gap-2 border-b border-border">
+    <aside className="flex shrink-0 flex-col gap-2 border-b bg-background p-3 md:w-56 md:border-r md:border-b-0">
+      <div className="flex items-center justify-between gap-3">
         <Logo />
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="text-xs font-semibold text-muted-foreground">
           Quản trị
         </span>
       </div>
-
       <nav
-        aria-label="Điều hướng Quản trị"
-        className="flex-1 p-2 space-y-0.5 text-sm"
+        aria-label="Điều hướng quản trị"
+        className="flex flex-wrap gap-1 md:flex-1 md:flex-col md:pt-4"
       >
-        <p className="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Hàng đợi
-        </p>
-        {items.map((item) => {
-          const active = item.key === view;
-          const Icon = item.icon;
+        {links.map(({ href, label, Icon }) => {
+          const active =
+            pathname === href ||
+            (href === "/admin/moderation" && pathname === "/admin") ||
+            (href === "/admin/events/control" &&
+              pathname.startsWith("/admin/events/"));
           return (
             <Link
-              key={item.key}
-              href={`/admin?view=${item.key}`}
+              key={href}
+              href={href}
               aria-current={active ? "page" : undefined}
-              className={`flex items-center gap-2 h-8 px-2 rounded-md transition-colors ${
-                active
-                  ? "bg-secondary text-foreground font-semibold"
-                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-              }`}
+              className="flex min-h-9 items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-secondary aria-[current=page]:font-semibold"
             >
-              <Icon className="size-4 shrink-0" />
-              <span className="flex-1 truncate">{item.label}</span>
-              <span
-                className={`min-w-5 px-1.5 rounded-full text-[11px] font-semibold text-center tabular-nums ${
-                  item.urgent && item.count > 0
-                    ? "bg-amber-500/15 text-amber-700"
-                    : "text-muted-foreground"
-                }`}
-              >
-                {item.count}
-              </span>
+              <Icon aria-hidden="true" className="size-4 shrink-0" />
+              {label}
             </Link>
           );
         })}
       </nav>
-
-      <div className="border-t border-border p-2 space-y-0.5">
-        <Link
-          href="/"
-          className="flex items-center gap-2 h-8 px-2 rounded-md text-xs text-muted-foreground hover:bg-secondary/60 hover:text-foreground transition-colors"
-        >
-          <Home className="size-3.5" />
-          <span>Trang mua vé công khai</span>
-        </Link>
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <div className="size-6 rounded-full bg-secondary text-foreground text-[11px] font-bold flex items-center justify-center">
-            {user?.fullName ? user.fullName.charAt(0).toUpperCase() : "A"}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold truncate">
-              {user?.fullName || "Quản trị viên"}
-            </p>
-            <p className="text-[11px] text-muted-foreground truncate">
-              {user?.email || "admin@tickethub.vn"}
-            </p>
-          </div>
-          <button
-            type="button"
+      <div className="border-t pt-2">
+        <p className="truncate px-2 text-xs text-muted-foreground">
+          {user?.fullName}
+        </p>
+        <div className="mt-1 flex items-center gap-1">
+          <Link
+            href="/"
+            aria-label="Về trang chủ"
+            className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-sm font-medium hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <Home aria-hidden="true" className="size-4 shrink-0" />
+            Về trang chủ
+          </Link>
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label="Đăng xuất"
-            title="Đăng xuất"
             onClick={async () => {
               await logout();
-              router.push("/auth");
+              router.replace("/auth");
             }}
-            className="size-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
           >
-            <LogOut className="size-3.5" />
-          </button>
+            <LogOut aria-hidden="true" className="size-4" />
+          </Button>
         </div>
       </div>
     </aside>
-  );
-}
-
-export function AdminSidebar() {
-  return (
-    <Suspense
-      fallback={<aside className="w-56 shrink-0 border-r bg-background" />}
-    >
-      <SidebarInner />
-    </Suspense>
   );
 }

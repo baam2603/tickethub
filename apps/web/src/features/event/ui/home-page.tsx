@@ -78,13 +78,16 @@ function EventGridCard({
   return (
     <div className="group relative flex flex-col">
       <div className="relative aspect-[5/4] w-full overflow-hidden rounded-[16px] bg-[#eff1f2]">
-        <Link href={`/events/${event.id}`} className="block h-full w-full">
+        <Link
+          href={`/events/${event.id}`}
+          prefetch={false}
+          className="block h-full w-full"
+        >
           <Image
             src={event.image}
             alt={event.title}
             fill
-            unoptimized
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            sizes="(min-width: 1200px) 276px, (min-width: 640px) 25vw, 50vw"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         </Link>
@@ -99,7 +102,11 @@ function EventGridCard({
         </button>
       </div>
 
-      <Link href={`/events/${event.id}`} className="pt-2 flex flex-col">
+      <Link
+        href={`/events/${event.id}`}
+        prefetch={false}
+        className="pt-2 flex flex-col"
+      >
         <h3 className="text-[14px] font-bold leading-[1.35] text-[#141d23] truncate group-hover:text-primary transition-colors">
           {event.title}
         </h3>
@@ -121,11 +128,18 @@ const CATEGORY_CODES: CategoryCode[] = [
   "FESTIVAL",
 ];
 
+const heroEvents = EVENTS.filter((event) => event.featuredOrder).sort(
+  (a, b) => (a.featuredOrder ?? 99) - (b.featuredOrder ?? 99),
+);
+
 export function HomePage() {
   return (
-    <Suspense fallback={<div className="min-h-[540px] bg-surface-dark" />}>
-      <HomeContent />
-    </Suspense>
+    <div className="bg-white">
+      <SpotlightHero events={heroEvents} />
+      <Suspense fallback={<div className="min-h-56" />}>
+        <HomeContent />
+      </Suspense>
+    </div>
   );
 }
 
@@ -209,15 +223,6 @@ function HomeContent() {
           ? "Tháng 11"
           : "Tháng 12";
 
-  // Hero: luon hien thi cac su kien noi bat nhat, khong doi theo danh muc
-  const heroEvents = useMemo(
-    () =>
-      EVENTS.filter((e) => e.featuredOrder).sort(
-        (a, b) => (a.featuredOrder ?? 99) - (b.featuredOrder ?? 99),
-      ),
-    [],
-  );
-
   // Filtered pool for carousels below the filter bar
   const filteredPool = useMemo(() => {
     return EVENTS.filter((ev) => {
@@ -264,8 +269,7 @@ function HomeContent() {
   }, [filteredPool]);
 
   return (
-    <div className="bg-white">
-      <SpotlightHero events={heroEvents} />
+    <>
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6">
         <div className="pt-8" />
 
@@ -408,8 +412,7 @@ function HomeContent() {
                     src={cat.image}
                     alt={cat.title}
                     fill
-                    unoptimized
-                    sizes="(max-width: 640px) 50vw, 25vw"
+                    sizes="(min-width: 1200px) 276px, (min-width: 640px) 25vw, 50vw"
                     className="h-full w-full object-cover brightness-75 transition-transform duration-300 group-hover:scale-105"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
@@ -526,7 +529,6 @@ function HomeContent() {
                   alt=""
                   width={44}
                   height={44}
-                  unoptimized
                   className="size-11 rounded-full object-cover border-2 border-white"
                 />
                 <Image
@@ -534,7 +536,6 @@ function HomeContent() {
                   alt=""
                   width={44}
                   height={44}
-                  unoptimized
                   className="size-11 rounded-full object-cover border-2 border-white"
                 />
                 <Image
@@ -542,7 +543,6 @@ function HomeContent() {
                   alt=""
                   width={44}
                   height={44}
-                  unoptimized
                   className="size-11 rounded-full object-cover border-2 border-white"
                 />
               </div>
@@ -561,6 +561,6 @@ function HomeContent() {
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

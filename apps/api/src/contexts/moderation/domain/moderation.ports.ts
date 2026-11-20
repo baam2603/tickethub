@@ -1,4 +1,8 @@
 import type {
+  EventControlListData,
+  EventControlQuery,
+} from "@tickethub/shared";
+import type {
   AuditEntry,
   AuditLogListData,
   AuditLogQuery,
@@ -66,6 +70,7 @@ export interface ModerationUnitOfWork {
 }
 
 export interface ModerationQueryPort {
+  listEventControls(query: EventControlQuery): Promise<EventControlListData>;
   listPendingOrganizers(): Promise<Array<Record<string, unknown>>>;
   listPendingEvents(): Promise<Array<Record<string, unknown>>>;
   eventExists(eventId: string): Promise<boolean>;

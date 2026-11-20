@@ -31,6 +31,7 @@ import {
 import {
   ApproveActionSchema,
   AuditLogQuerySchema,
+  EventControlQuerySchema,
   EventKillSwitchRequestSchema,
   EventResumeRequestSchema,
   RejectActionSchema,
@@ -219,6 +220,24 @@ export class AdminController {
         total: items.length,
       },
     };
+  }
+
+  @Get("events/control")
+  async getEventControls(@Query() query: unknown) {
+    const result = EventControlQuerySchema.safeParse(query);
+    if (!result.success) {
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Bộ lọc quản trị sự kiện không hợp lệ",
+        },
+      });
+    }
+    const data = await mapModerationErrors(() =>
+      this.eventModeration.getEventControls(result.data),
+    );
+    return { success: true, data };
   }
 
   // POST /api/v1/admin/events/:id/approve

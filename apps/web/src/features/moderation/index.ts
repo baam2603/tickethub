@@ -1,4 +1,4 @@
-// API cong khai cua feature moderation (cong quan tri: kiem duyet KYC, phe duyet su kien)
-export type { AuditLogEntry } from "./domain/moderation.types";
-export { AdminSidebar } from "./ui/admin-sidebar";
+export { AdminAccess } from "./ui/admin-access";
 export { AdminPage } from "./ui/admin-page";
+export { EventControlList } from "./ui/event-control-list";
+export { EventControlPage } from "./ui/event-control-page";

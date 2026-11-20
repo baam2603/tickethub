@@ -21,6 +21,29 @@ export const EventResumeRequestSchema = z.object({
 });
 export type EventResumeRequest = z.infer<typeof EventResumeRequestSchema>;
 
+export const EventControlQuerySchema = z.object({
+  eventId: z.uuid().optional(),
+  status: z.enum(["PUBLISHED", "SUSPENDED"]).optional(),
+  page: z.coerce.number().int().min(1).max(10000).default(1),
+});
+
+export type EventControlQuery = z.infer<typeof EventControlQuerySchema>;
+
+export interface EventControlItem {
+  id: string;
+  title: string;
+  bannerUrl?: string | null;
+  status: string;
+  version: number;
+  endTime: string;
+  rejectionReason: string | null;
+}
+
+export interface EventControlListData {
+  items: EventControlItem[];
+  hasMore: boolean;
+}
+
 export const AuditLogQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),

@@ -54,15 +54,16 @@ export function SpotlightHero({ events }: { events: EventItem[] }) {
       {/* Anh su kien: chiem phan lon hero, khong bi che boi lop phu */}
       <div
         key={active.id}
-        className="absolute inset-y-0 right-0 w-full md:w-[72%] animate-in fade-in duration-700"
+        className={`absolute inset-y-0 right-0 w-full md:w-[72%] ${index === 0 ? "" : "animate-in fade-in duration-700"}`}
         style={{ maskImage: FADE_MASK, WebkitMaskImage: FADE_MASK }}
       >
         <Image
           src={active.image}
           alt={`Poster ${active.title}`}
           fill
-          unoptimized
-          priority
+          fetchPriority={index === 0 ? "high" : "auto"}
+          loading="eager"
+          quality={60}
           sizes="(max-width: 768px) 100vw, 72vw"
           className="object-cover object-[center_30%]"
         />
@@ -123,8 +124,8 @@ export function SpotlightHero({ events }: { events: EventItem[] }) {
                       src={ev.image}
                       alt=""
                       fill
-                      unoptimized
                       sizes="80px"
+                      fetchPriority="low"
                       className="object-cover"
                     />
                   </button>

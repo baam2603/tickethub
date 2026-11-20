@@ -1,4 +1,8 @@
-import { EventStatus, UserRole } from "@tickethub/shared";
+import {
+  EventStatus,
+  UserRole,
+  type EventControlQuery,
+} from "@tickethub/shared";
 import {
   assertCanResume,
   assertCanSuspend,
@@ -35,6 +39,10 @@ export class EventModerationService {
 
   getPendingEvents() {
     return this.query.listPendingEvents();
+  }
+
+  getEventControls(query: EventControlQuery) {
+    return this.query.listEventControls(query);
   }
 
   reviewEvent(

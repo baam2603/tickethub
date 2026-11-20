@@ -1,10 +1,11 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   EventStatus,
   OrderStatus,
   OrganizerStatus,
   OutboxStatus,
   SeatStatus,
+  type EventControlQuery,
 } from "@tickethub/shared";
 import { db } from "../../../database/db";
 import {
@@ -305,6 +306,7 @@ export class DrizzleModerationQuery implements ModerationQueryPort {
       .select({
         id: events.id,
         title: events.title,
+        bannerUrl: events.bannerUrl,
         organizerId: events.organizerId,
         organizationName: organizerProfiles.organizationName,
         status: events.status,
@@ -319,6 +321,35 @@ export class DrizzleModerationQuery implements ModerationQueryPort {
       )
       .where(eq(events.status, EventStatus.PENDING_APPROVAL))
       .orderBy(desc(events.createdAt));
+  }
+
+  async listEventControls({ eventId, status, page }: EventControlQuery) {
+    const limit = 20;
+    const statusFilter = status
+      ? eq(events.status, status)
+      : inArray(events.status, [EventStatus.PUBLISHED, EventStatus.SUSPENDED]);
+    const rows = await db
+      .select({
+        id: events.id,
+        title: events.title,
+        bannerUrl: events.bannerUrl,
+        status: events.status,
+        version: events.version,
+        endTime: events.endTime,
+        rejectionReason: events.rejectionReason,
+      })
+      .from(events)
+      .where(eventId ? eq(events.id, eventId) : statusFilter)
+      .orderBy(desc(events.updatedAt), desc(events.id))
+      .limit(limit + 1)
+      .offset((page - 1) * limit);
+    return {
+      items: rows.slice(0, limit).map((row) => ({
+        ...row,
+        endTime: row.endTime.toISOString(),
+      })),
+      hasMore: rows.length > limit,
+    };
   }
 
   async eventExists(eventId: string) {
