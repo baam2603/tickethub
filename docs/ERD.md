@@ -916,3 +916,16 @@ unstable giữ 18 bảng nền, gồm venues và venue_layouts, thêm organizer_
 0000-0004 của unstable giữ nguyên. Migration 0005_integrate-w03-w05.sql thêm schema W04/W05 theo cách kiểm tra tồn tại,
 hỗ trợ DB cũ của các nhánh W04/W05; chỉ dựng lại MV khi cần mở rộng orders.status lên varchar(32).
 Các bảng nghiệp vụ không bị xóa. Các mốc waiting room đã bị loại bỏ theo AGENTS.
+
+### reconciliation_reports
+
+Migration 0006 lưu kết quả đối soát VNPay gần nhất theo sự kiện và đặt chỉ mục duy nhất trên `payouts.event_id`. Chạy migration sau khi đã xử lý các lệnh chi trả trùng sự kiện theo lịch sử kiểm toán.
+
+| Cột               | Kiểu        | Ràng buộc          | Mô tả                                                          |
+| ----------------- | ----------- | ------------------ | -------------------------------------------------------------- |
+| event_id          | UUID        | PK, FK → events.id | Sự kiện đã chốt                                                |
+| source_hash       | VARCHAR(64) | NOT NULL           | SHA-256 của CSV đầu vào                                        |
+| ledger_hash       | VARCHAR(64) | NOT NULL           | SHA-256 của đơn, giao dịch và hoàn tiền tại thời điểm đối soát |
+| discrepancy_count | INTEGER     | NOT NULL           | Số dòng cần điều tra                                           |
+| items             | JSONB       | NOT NULL           | Các dòng đã phân loại, số tiền nội bộ và VNPay, lý do sai lệch |
+| reconciled_at     | TIMESTAMPTZ | NOT NULL           | Thời điểm đối soát                                             |

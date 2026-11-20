@@ -1043,11 +1043,25 @@ Truy vấn danh sách lịch sử kiểm toán bất biến theo sự kiện ph�
 
 #### `GET /api/v1/admin/reconciliations`
 
-Lấy danh sách đối soát giao dịch giữa đơn hàng hệ thống và dữ liệu thanh toán VNPay.
+Đọc kết quả job đối soát VNPay gần nhất theo sự kiện.
 
-- Header: `Authorization: Bearer <adminToken>`
-- Query params: `eventId` (tùy chọn), `status` (`ALL`, `MATCHED`, `AMOUNT_MISMATCH`, `MISSING_TRANSACTION`, `ORPHAN_TRANSACTION`), `page`, `limit`
-- Response 200: Danh sách giao dịch đối soát, phân loại trạng thái và khối thống kê tổng hợp `summary`.
+- Header `Authorization: Bearer <adminToken>`
+- Query params `eventId` (tùy chọn), `status` (`ALL`, `MATCHED`, `AMOUNT_MISMATCH`, `MISSING_TRANSACTION`, `ORPHAN_TRANSACTION`), `page`, `limit`
+- Response 200 gồm `items`, `meta`, `summary` trước lọc trạng thái và `report` khi lọc theo sự kiện đã đối soát. `report` chứa `sourceHash`, `reconciledAt` và `discrepancyCount`.
+- Mỗi dòng có `kind` (`PAYMENT` hoặc `REFUND`), `gatewayAmount` và `issue`. Mã `issue` phân biệt lỗi số tiền, mã giao dịch, trạng thái, thiếu dòng hoặc trùng dòng. Báo cáo phản ánh thời điểm nhập và điều kiện duyệt được kiểm tra lại trên dữ liệu hiện tại.
+
+#### `POST /api/v1/admin/events/:id/end`
+
+Chốt sự kiện `PUBLISHED` đã qua giờ kết thúc để đối soát. Endpoint yêu cầu ADMIN, chuyển trạng thái thành `ENDED` và ghi audit. Gọi lại với sự kiện `ENDED` trả kết quả cũ. Trả 409 cho sự kiện chưa đủ điều kiện.
+
+#### `GET /api/v1/admin/settlement-report`
+
+Tổng hợp dòng tiền toàn hệ thống từ dữ liệu báo cáo W05. Hai đầu ngày tính theo giờ Việt Nam. Tiền thu tính theo ngày thanh toán và hoàn tiền theo ngày hoàn tất.
+
+- Header `Authorization: Bearer <adminToken>`
+- Query params `fromDate` và `toDate` theo ISO, phạm vi tối đa 366 ngày. `groupBy` nhận `day`, `category`, `city`, `organizer` hoặc `provider`. Bộ lọc tùy chọn gồm `category`, `city`, `organizerId` và `provider` (`VNPAY` hoặc `UNATTRIBUTED`).
+- `format=json` trả số tiền dưới dạng chuỗi thập phân. `format=csv` trả tệp tải xuống. Khi vượt 10.000 nhóm, API trả 422 để thu hẹp bộ lọc.
+- `netRevenue` là tiền thu sau hoàn. Phí và tiền thực chi xem tại API payouts.
 
 #### `GET /api/v1/admin/payouts`
 
@@ -1059,7 +1073,7 @@ Lấy danh sách các lệnh quyết toán chi trả doanh thu cho Ban tổ ch�
 
 #### `POST /api/v1/admin/payouts/generate`
 
-Tính toán doanh thu sự kiện, khấu trừ tiền hoàn vé, phí sàn (5%) và phí cổng VNPay (1.5%) để tạo hoặc cập nhật lệnh quyết toán ở trạng thái `PENDING`.
+Tính quyết toán cho sự kiện `ENDED` hoặc `CANCELLED`. Doanh thu lấy từ giao dịch VNPay thành công, khấu trừ các khoản hoàn đã hoàn tất, phí sàn 5% trên doanh thu sau hoàn và phí VNPay 1,5% trên doanh thu gốc. Nếu đối soát chưa hợp lệ hoặc lệnh đã được giữ, trạng thái là `HOLD`.
 
 - Header: `Authorization: Bearer <adminToken>`
 - Request body: `{ "eventId": "uuid-event" }`
@@ -1067,7 +1081,7 @@ Tính toán doanh thu sự kiện, khấu trừ tiền hoàn vé, phí sàn (5%)
 
 #### `POST /api/v1/admin/payouts/:id/approve`
 
-Xác nhận phê duyệt lệnh chi trả tiền bán vé cho ban tổ chức.
+Xác nhận chi trả mô phỏng. Lệnh phải ở `PENDING`, kết quả đối soát còn khớp với dữ liệu hiện tại và số tiền đã được tính lại. Trả 409 khi điều kiện chưa đạt.
 
 - Header: `Authorization: Bearer <adminToken>`
 - Response 200: Lệnh chi trả chuyển trạng thái `PAID_OUT` và ghi vết kiểm toán vào `audit_log`.
@@ -1079,6 +1093,10 @@ Tạm giữ lệnh chi trả khi phát hiện khiếu nại hoặc tranh chấp 
 - Header: `Authorization: Bearer <adminToken>`
 - Request body: `{ "reason": "Phát hiện đơn hàng tranh chấp đang khiếu nại" }`
 - Response 200: Lệnh chi trả chuyển trạng thái `HOLD` kèm lý do.
+
+#### `POST /api/v1/admin/payouts/:id/release`
+
+Admin gỡ tạm giữ sau khi xử lý tranh chấp và có kết quả đối soát sạch, còn hiệu lực. Body gồm `reason` từ 1 đến 500 ký tự. API tính lại số tiền, chuyển lệnh về `PENDING` và ghi audit. Trả 409 nếu lệnh chưa đủ điều kiện.
 
 #### `POST /api/v1/admin/payouts/:id/recalculate`
 

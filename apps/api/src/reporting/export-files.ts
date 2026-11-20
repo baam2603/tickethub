@@ -13,3 +13,9 @@ export function exportFilePath(name: string) {
     throw new Error("INVALID_EXPORT_FILE");
   return join(reportDirectory(), name);
 }
+
+export function csvCell(value: unknown) {
+  const raw = String(value ?? "");
+  const safe = /^\s*[=+@-]|^[\t\r\n]/.test(raw) ? "'" + raw : raw;
+  return '"' + safe.replaceAll('"', '""') + '"';
+}

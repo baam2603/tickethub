@@ -199,6 +199,22 @@ export class BookingService {
     const sortedExplicitSeatIds = [...explicitSeatIds].sort();
 
     const result = await db.transaction(async (tx) => {
+      // Đồng bộ với thao tác chốt sự kiện cho quyết toán.
+      const [currentEvent] = await tx
+        .select({ status: events.status })
+        .from(events)
+        .where(eq(events.id, dto.eventId))
+        .for("share");
+      if (currentEvent?.status !== EventStatus.PUBLISHED) {
+        throw new BadRequestException({
+          success: false,
+          error: {
+            code: "EVENT_NOT_PUBLISHED",
+            message: "Sự kiện chưa mở bán vé hoặc đã kết thúc",
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
       const now = new Date();
       const holdExpiresAt = new Date(now.getTime() + 5 * 60 * 1000);
       const allHeldSeatIds: string[] = [];

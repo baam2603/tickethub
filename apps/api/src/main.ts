@@ -7,12 +7,17 @@ import {
 import fastifyCookie from "@fastify/cookie";
 import { AppModule } from "./app.module";
 import { env } from "./config/env.config";
+import { isAllowedIp, parseIpAllowlist } from "./config/ip-allowlist";
+import { initializePaymentMonitoring } from "./monitoring/payment-monitoring";
 
 async function bootstrap() {
+  initializePaymentMonitoring();
+  const trustedProxies = parseIpAllowlist(env.TRUSTED_PROXY_CIDRS);
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
       logger: env.NODE_ENV !== "production",
+      trustProxy: (address: string) => isAllowedIp(trustedProxies, address),
     }),
   );
 

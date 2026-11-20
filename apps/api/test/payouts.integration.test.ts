@@ -1,506 +1,455 @@
-import { describe, it } from "node:test";
+import "reflect-metadata";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { after, before, describe, it } from "node:test";
+import { Module } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
+import { JwtService } from "@nestjs/jwt";
 import {
-  ConflictException,
-  BadRequestException,
-  ForbiddenException,
-} from "@nestjs/common";
+  FastifyAdapter,
+  type NestFastifyApplication,
+} from "@nestjs/platform-fastify";
+import { and, eq, inArray } from "drizzle-orm";
+import { env } from "../src/config/env.config";
+import { db, sqlClient } from "../src/database/db";
+import {
+  auditLog,
+  events,
+  orders,
+  organizerProfiles,
+  payouts,
+  reconciliationReports,
+  refunds,
+  transactions,
+  users,
+} from "../src/database/schema";
 import { AdminPayoutsController } from "../src/payouts/admin-payouts.controller";
 import { OrganizerPayoutsController } from "../src/payouts/organizer-payouts.controller";
 import { PayoutsService } from "../src/payouts/payouts.service";
 import { ReconciliationsService } from "../src/payouts/reconciliations.service";
-import {
-  PayoutStatus,
-  ReconciliationStatus,
-  type AuthenticatedUser,
-} from "@tickethub/shared";
+import { refreshReportViews } from "../src/reporting/report-data";
 
-interface MemoryPayout {
-  id: string;
-  organizerId: string;
-  eventId: string;
-  totalRevenue: string;
-  platformFee: string;
-  gatewayFee: string;
-  refundDeduction: string;
-  netPayout: string;
-  status: string;
-  holdReason: string | null;
-  paidOutAt: Date | null;
-  approvedBy: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
+const jwt = new JwtService({ secret: env.JWT_SECRET });
+@Module({
+  controllers: [AdminPayoutsController, OrganizerPayoutsController],
+  providers: [
+    PayoutsService,
+    ReconciliationsService,
+    { provide: JwtService, useValue: jwt },
+  ],
+})
+class SettlementTestModule {}
 
-interface MemoryAuditLog {
-  id: number;
-  actorId: string;
-  actorRole: string;
-  action: string;
-  targetType: string;
-  targetId: string;
-  changes: Record<string, unknown>;
-  ipAddress: string | null;
-  userAgent: string | null;
-  createdAt: Date;
-}
+const header = "vnp_TxnRef,vnp_TransactionNo,vnp_Amount,vnp_TransactionType";
+const csv = (...rows: string[]) => [header, ...rows].join("\r\n") + "\r\n";
 
-describe("Reconciliations & Payouts Integration Test Suite", () => {
-  const adminUser: AuthenticatedUser = {
-    userId: "admin-uuid-1",
-    email: "admin@tickethub.vn",
-    role: "ADMIN",
-  };
+describe("W06 BE2: đối soát VNPay và quyết toán UC11 qua HTTP", () => {
+  const createdUsers: string[] = [];
+  const createdEvents: string[] = [];
+  const createdProfiles: string[] = [];
+  let app: NestFastifyApplication;
+  let base: string;
+  let admin: string;
+  let buyer: string;
+  let organizer: string;
+  let otherOrganizer: string;
+  let eventId: string;
+  let otherEvent: string;
+  let orderId: string;
+  let paymentRef: string;
+  let paymentNumber: string;
+  let refundNumber: string;
+  let report: string;
+  const now = new Date();
+  const reconciliation = new ReconciliationsService();
 
-  const organizerUserA: AuthenticatedUser = {
-    userId: "user-org-A",
-    email: "orgA@tickethub.vn",
-    role: "ORGANIZER",
-  };
+  async function http(
+    path: string,
+    options: {
+      method?: string;
+      body?: Record<string, unknown>;
+      actor?: string;
+      role?: string;
+    } = {},
+  ) {
+    return fetch(base + "/api/v1" + path, {
+      method: options.method ?? "GET",
+      headers: {
+        authorization:
+          "Bearer " +
+          (await jwt.signAsync({
+            sub: options.actor ?? admin,
+            role: options.role ?? "ADMIN",
+          })),
+        ...(options.body ? { "content-type": "application/json" } : {}),
+      },
+      ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+      signal: AbortSignal.timeout(10_000),
+    });
+  }
 
-  const organizerProfileA = {
-    id: "org-profile-A",
-    userId: "user-org-A",
-    organizationName: "Công ty Âm Nhạc A",
-  };
+  async function makeUser(role: "ADMIN" | "ORGANIZER" | "BUYER") {
+    const [created] = await db
+      .insert(users)
+      .values({
+        email: `w06-${randomUUID()}@example.com`,
+        fullName: "UC11 Fixture",
+        phone: "0912345678",
+        passwordHash: "test",
+        role,
+        status: "ACTIVE",
+      })
+      .returning({ id: users.id });
+    createdUsers.push(created!.id);
+    return created!.id;
+  }
 
-  const eventUuid = "11111111-1111-4111-a111-111111111111";
-  const payoutUuid = "22222222-2222-4222-a222-222222222222";
+  async function makeEvent(owner: string, endTime: Date) {
+    const [profile] = await db
+      .insert(organizerProfiles)
+      .values({
+        userId: owner,
+        organizationName: "UC11 Organizer",
+        taxCode: randomUUID(),
+        businessLicenseUrl: "https://example.com/license",
+        representativeName: "UC11",
+        status: "VERIFIED",
+      })
+      .returning({ id: organizerProfiles.id });
+    createdProfiles.push(profile!.id);
+    const [event] = await db
+      .insert(events)
+      .values({
+        organizerId: profile!.id,
+        title: "UC11 Event",
+        slug: `w06-${randomUUID()}`,
+        description: "UC11",
+        category: "CONCERT",
+        bannerUrl: "https://example.com/event",
+        venueName: "UC11",
+        venueAddress: "UC11",
+        city: "+UC11",
+        startTime: new Date(now.getTime() - 86_400_000),
+        endTime,
+        gateOpeningTime: now,
+        status: "PUBLISHED",
+      })
+      .returning({ id: events.id });
+    createdEvents.push(event!.id);
+    return event!.id;
+  }
 
-  const memoryPayouts: MemoryPayout[] = [];
-  const memoryAuditLogs: MemoryAuditLog[] = [];
+  before(async () => {
+    assert.match(new URL(env.DATABASE_URL).pathname, /_test$/);
+    admin = await makeUser("ADMIN");
+    buyer = await makeUser("BUYER");
+    organizer = await makeUser("ORGANIZER");
+    otherOrganizer = await makeUser("ORGANIZER");
+    eventId = await makeEvent(organizer, new Date(now.getTime() - 60_000));
+    otherEvent = await makeEvent(
+      otherOrganizer,
+      new Date(now.getTime() + 86_400_000),
+    );
 
-  // Mock PayoutsService
-  const mockPayoutsService = {
-    generatePayout: async (eventId: string, _adminUserId: string) => {
-      const existing = memoryPayouts.find((p) => p.eventId === eventId);
-      if (existing && existing.status === PayoutStatus.PAID_OUT) {
-        throw new ConflictException(
-          "PAYOUT_ALREADY_PAID_OUT: Lệnh chi trả cho sự kiện này đã được thanh toán hoàn tất",
-        );
-      }
-
-      // Gia lap tinh toan: grossRevenue = 100.000.000, refundDeduction = 2.000.000
-      const grossRevenue = 100000000;
-      const refundDeduction = 2000000;
-      const retainedRevenue = grossRevenue - refundDeduction; // 98.000.000
-      const platformFee = Math.round(retainedRevenue * 0.05); // 4.900.000
-      const gatewayFee = Math.round(grossRevenue * 0.015); // 1.500.000
-      const netPayout = retainedRevenue - platformFee - gatewayFee; // 91.600.000
-
-      if (existing) {
-        existing.totalRevenue = String(grossRevenue);
-        existing.platformFee = String(platformFee);
-        existing.gatewayFee = String(gatewayFee);
-        existing.refundDeduction = String(refundDeduction);
-        existing.netPayout = String(netPayout);
-        existing.updatedAt = new Date();
-        return existing;
-      }
-
-      const newPayout: MemoryPayout = {
-        id: payoutUuid,
-        organizerId: organizerProfileA.id,
+    const [order] = await db
+      .insert(orders)
+      .values({
+        orderCode: `W06-${randomUUID().slice(0, 24)}`,
+        userId: buyer,
         eventId,
-        totalRevenue: String(grossRevenue),
-        platformFee: String(platformFee),
-        gatewayFee: String(gatewayFee),
-        refundDeduction: String(refundDeduction),
-        netPayout: String(netPayout),
-        status: PayoutStatus.PENDING,
-        holdReason: null,
-        paidOutAt: null,
-        approvedBy: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      memoryPayouts.push(newPayout);
-      return newPayout;
-    },
-
-    approvePayout: async (
-      payoutId: string,
-      adminUserId: string,
-      ipAddress?: string,
-      userAgent?: string,
-    ) => {
-      const payout = memoryPayouts.find((p) => p.id === payoutId);
-      if (!payout) {
-        throw new BadRequestException("PAYOUT_NOT_FOUND");
-      }
-      if (payout.status === PayoutStatus.PAID_OUT) {
-        throw new ConflictException(
-          "PAYOUT_ALREADY_APPROVED: Lệnh chi trả này đã được phê duyệt trước đó",
-        );
-      }
-
-      payout.status = PayoutStatus.PAID_OUT;
-      payout.approvedBy = adminUserId;
-      payout.paidOutAt = new Date();
-      payout.updatedAt = new Date();
-
-      memoryAuditLogs.push({
-        id: memoryAuditLogs.length + 1,
-        actorId: adminUserId,
-        actorRole: "ADMIN",
-        action: "APPROVE_PAYOUT",
-        targetType: "PAYOUT",
-        targetId: payout.id,
-        changes: { newStatus: PayoutStatus.PAID_OUT },
-        ipAddress: ipAddress ?? null,
-        userAgent: userAgent ?? null,
-        createdAt: new Date(),
-      });
-
-      return {
-        ...payout,
-        message: "Lệnh chi trả đã được phê duyệt thành công.",
-      };
-    },
-
-    holdPayout: async (
-      payoutId: string,
-      reason: string,
-      adminUserId: string,
-      ipAddress?: string,
-      userAgent?: string,
-    ) => {
-      const payout = memoryPayouts.find((p) => p.id === payoutId);
-      if (!payout) {
-        throw new BadRequestException("PAYOUT_NOT_FOUND");
-      }
-      if (payout.status === PayoutStatus.PAID_OUT) {
-        throw new BadRequestException(
-          "CANNOT_HOLD_PAID_OUT: Không thể tạm giữ lệnh chi trả đã hoàn tất",
-        );
-      }
-
-      payout.status = PayoutStatus.HOLD;
-      payout.holdReason = reason;
-      payout.updatedAt = new Date();
-
-      memoryAuditLogs.push({
-        id: memoryAuditLogs.length + 1,
-        actorId: adminUserId,
-        actorRole: "ADMIN",
-        action: "HOLD_PAYOUT",
-        targetType: "PAYOUT",
-        targetId: payout.id,
-        changes: { newStatus: PayoutStatus.HOLD, holdReason: reason },
-        ipAddress: ipAddress ?? null,
-        userAgent: userAgent ?? null,
-        createdAt: new Date(),
-      });
-
-      return payout;
-    },
-
-    recalculatePayout: async (payoutId: string, adminUserId: string) => {
-      const payout = memoryPayouts.find((p) => p.id === payoutId);
-      if (!payout) {
-        throw new BadRequestException("PAYOUT_NOT_FOUND");
-      }
-      if (payout.status === PayoutStatus.PAID_OUT) {
-        throw new ConflictException("PAYOUT_ALREADY_PAID_OUT");
-      }
-      return await mockPayoutsService.generatePayout(
-        payout.eventId,
-        adminUserId,
-      );
-    },
-
-    getAdminPayouts: async () => ({
-      items: memoryPayouts,
-      meta: {
-        total: memoryPayouts.length,
-        page: 1,
-        limit: 20,
-        totalPages: 1,
-      },
-    }),
-
-    getOrganizerPayouts: async (userId: string) => {
-      if (userId !== organizerProfileA.userId) {
-        throw new ForbiddenException("ORGANIZER_PROFILE_REQUIRED");
-      }
-      const items = memoryPayouts.filter(
-        (p) => p.organizerId === organizerProfileA.id,
-      );
-      return {
-        items,
-        meta: {
-          total: items.length,
-          page: 1,
-          limit: 20,
-          totalPages: 1,
-        },
-      };
-    },
-  } as unknown as PayoutsService;
-
-  // Mock ReconciliationsService
-  const mockReconciliationsService = {
-    getReconciliations: async (query: {
-      eventId?: string;
-      status?: string;
-    }) => {
-      let items = [
-        {
-          orderId: "ord-1",
-          orderCode: "ORD-001",
-          eventId: "evt-1",
-          eventTitle: "Concert A",
-          orderAmount: 1500000,
-          paidAmount: 1500000,
-          refundedAmount: 0,
-          transactionRef: "vnp-001",
-          providerTxNumber: "123456",
-          bankCode: "NCB",
-          payDate: new Date(),
-          reconciliationStatus: ReconciliationStatus.MATCHED,
-        },
-        {
-          orderId: "ord-2",
-          orderCode: "ORD-002",
-          eventId: "evt-1",
-          eventTitle: "Concert A",
-          orderAmount: 2000000,
-          paidAmount: 1800000,
-          refundedAmount: 0,
-          transactionRef: "vnp-002",
-          providerTxNumber: "123457",
-          bankCode: "NCB",
-          payDate: new Date(),
-          reconciliationStatus: ReconciliationStatus.AMOUNT_MISMATCH,
-        },
-        {
-          orderId: "ord-3",
-          orderCode: "ORD-003",
-          eventId: "evt-1",
-          eventTitle: "Concert A",
-          orderAmount: 1000000,
-          paidAmount: 0,
-          refundedAmount: 0,
-          transactionRef: null,
-          providerTxNumber: null,
-          bankCode: null,
-          payDate: null,
-          reconciliationStatus: ReconciliationStatus.MISSING_TRANSACTION,
-        },
-      ];
-
-      // Chi them orphan transaction khi doi soat toan he thong (khong loc theo eventId)
-      if (!query.eventId) {
-        items.push({
-          orderId: null,
-          orderCode: null,
-          eventId: null,
-          eventTitle: null,
-          orderAmount: 0,
-          paidAmount: 500000,
-          refundedAmount: 0,
-          transactionRef: "vnp-orphan",
-          providerTxNumber: "999999",
-          bankCode: "VCB",
-          payDate: new Date(),
-          reconciliationStatus: ReconciliationStatus.ORPHAN_TRANSACTION,
-        });
-      }
-
-      if (query.eventId) {
-        items = items.filter((i) => i.eventId === query.eventId);
-      }
-
-      const filtered =
-        query.status && query.status !== "ALL"
-          ? items.filter((i) => i.reconciliationStatus === query.status)
-          : items;
-
-      return {
-        summary: {
-          totalTransactions: items.length,
-          totalOrderAmount: items.reduce((sum, i) => sum + i.orderAmount, 0),
-          totalPaidAmount: items.reduce((sum, i) => sum + i.paidAmount, 0),
-          totalRefundedAmount: 0,
-          matchedCount: items.filter(
-            (i) => i.reconciliationStatus === ReconciliationStatus.MATCHED,
-          ).length,
-          mismatchedCount: items.filter(
-            (i) => i.reconciliationStatus !== ReconciliationStatus.MATCHED,
-          ).length,
-        },
-        items: filtered,
-        meta: {
-          total: filtered.length,
-          page: 1,
-          limit: 20,
-          totalPages: 1,
-        },
-      };
-    },
-  } as unknown as ReconciliationsService;
-
-  const adminController = new AdminPayoutsController(
-    mockPayoutsService,
-    mockReconciliationsService,
-  );
-
-  const organizerController = new OrganizerPayoutsController(
-    mockPayoutsService,
-  );
-
-  const mockRequest = {
-    headers: {
-      "x-forwarded-for": "127.0.0.1",
-      "user-agent": "Node/TestRunner",
-    },
-    ip: "127.0.0.1",
-  } as unknown as import("fastify").FastifyRequest;
-
-  it("1. Generates payout correctly for event with financial deduction", async () => {
-    const res = await adminController.generatePayout(adminUser, {
-      eventId: eventUuid,
+        totalAmount: "120000",
+        discountAmount: "20000",
+        finalAmount: "100000",
+        expiresAt: now,
+        paidAt: now,
+        status: "PAID",
+      })
+      .returning({ id: orders.id });
+    orderId = order!.id;
+    paymentRef = `BE2${randomUUID().replaceAll("-", "")}`;
+    paymentNumber = String(Date.now());
+    refundNumber = String(Date.now() + 1);
+    await db.insert(transactions).values({
+      orderId,
+      transactionRef: paymentRef,
+      providerTxNumber: paymentNumber,
+      amount: "100000",
+      status: "SUCCESS",
+      payDate: now,
+      idempotencyKey: randomUUID(),
     });
-
-    assert.equal(res.success, true);
-    assert.equal(res.data.status, PayoutStatus.PENDING);
-    assert.equal(res.data.totalRevenue, "100000000");
-    assert.equal(res.data.refundDeduction, "2000000");
-    assert.equal(res.data.platformFee, "4900000");
-    assert.equal(res.data.gatewayFee, "1500000");
-    assert.equal(res.data.netPayout, "91600000");
-  });
-
-  it("2. Holds payout with a dispute reason", async () => {
-    const res = await adminController.holdPayout(
-      payoutUuid,
-      adminUser,
-      { reason: "Đang khiếu nại tranh chấp đơn vé" },
-      mockRequest,
-    );
-
-    assert.equal(res.success, true);
-    assert.equal(res.data.status, PayoutStatus.HOLD);
-    assert.equal(res.data.holdReason, "Đang khiếu nại tranh chấp đơn vé");
-
-    // Check audit log
-    const log = memoryAuditLogs.find((l) => l.action === "HOLD_PAYOUT");
-    assert.ok(log);
-    assert.equal(log?.targetId, payoutUuid);
-  });
-
-  it("3. Recalculates payout while in HOLD status", async () => {
-    const res = await adminController.recalculatePayout(payoutUuid, adminUser);
-
-    assert.equal(res.success, true);
-    assert.equal(res.data.netPayout, "91600000");
-  });
-
-  it("4. Approves payout to PAID_OUT and verifies audit log entry", async () => {
-    const res = await adminController.approvePayout(
-      payoutUuid,
-      adminUser,
-      mockRequest,
-    );
-
-    assert.equal(res.success, true);
-    assert.equal(res.data.status, PayoutStatus.PAID_OUT);
-    assert.equal(res.data.approvedBy, adminUser.userId);
-    assert.ok(res.data.paidOutAt);
-
-    // Verify audit log
-    const approveLog = memoryAuditLogs.find(
-      (l) => l.action === "APPROVE_PAYOUT",
-    );
-    assert.ok(approveLog);
-    assert.equal(approveLog?.actorId, adminUser.userId);
-    assert.equal(approveLog?.actorRole, "ADMIN");
-  });
-
-  it("5. Rejects double approval on already PAID_OUT payout with 409 Conflict", async () => {
-    await assert.rejects(
-      async () => {
-        await adminController.approvePayout(payoutUuid, adminUser, mockRequest);
-      },
-      (err: unknown) => {
-        return (
-          err instanceof ConflictException &&
-          err.message.includes("PAYOUT_ALREADY_APPROVED")
-        );
-      },
-    );
-  });
-
-  it("6. Admin reconciliations categorizes matched and mismatched transactions", async () => {
-    const resAll = await adminController.getReconciliations({});
-    assert.equal(resAll.success, true);
-    assert.equal(resAll.data.summary.totalTransactions, 4);
-    assert.equal(resAll.data.summary.matchedCount, 1);
-    assert.equal(resAll.data.summary.mismatchedCount, 3);
-
-    // Filter by MATCHED
-    const resMatched = await adminController.getReconciliations({
-      status: "MATCHED",
+    await db.insert(refunds).values({
+      orderId,
+      amount: "20000",
+      status: "COMPLETED",
+      providerRefundRef: refundNumber,
+      processedAt: now,
+      reason: "Partial refund",
+      idempotencyKey: randomUUID(),
     });
-    assert.equal(resMatched.data.items.length, 1);
+    report = csv(
+      `${paymentRef},${paymentNumber},10000000,01`,
+      `${paymentRef},${refundNumber},2000000,03`,
+    );
+    app = await NestFactory.create<NestFastifyApplication>(
+      SettlementTestModule,
+      new FastifyAdapter(),
+      { logger: false },
+    );
+    await app.listen(0, "127.0.0.1");
+    base = await app.getUrl();
+  });
+
+  after(async () => {
+    await app?.close();
+    if (createdEvents.length) {
+      const settlementIds = await db
+        .delete(payouts)
+        .where(inArray(payouts.eventId, createdEvents))
+        .returning({ id: payouts.id });
+      await db
+        .delete(auditLog)
+        .where(
+          inArray(auditLog.targetId, [
+            ...createdEvents,
+            ...settlementIds.map(({ id }) => id),
+          ]),
+        );
+      await db
+        .delete(reconciliationReports)
+        .where(inArray(reconciliationReports.eventId, createdEvents));
+      if (orderId) {
+        await db.delete(refunds).where(eq(refunds.orderId, orderId));
+        await db.delete(transactions).where(eq(transactions.orderId, orderId));
+        await db.delete(orders).where(eq(orders.id, orderId));
+      }
+      await db.delete(events).where(inArray(events.id, createdEvents));
+    }
+    if (createdProfiles.length)
+      await db
+        .delete(organizerProfiles)
+        .where(inArray(organizerProfiles.id, createdProfiles));
+    if (createdUsers.length)
+      await db.delete(users).where(inArray(users.id, createdUsers));
+    if (createdEvents.length) await refreshReportViews();
+    await sqlClient.end();
+  });
+
+  it("yêu cầu ADMIN và chỉ chốt sự kiện đã qua giờ kết thúc", async () => {
     assert.equal(
-      resMatched.data.items[0]?.reconciliationStatus,
-      ReconciliationStatus.MATCHED,
+      (
+        await http(`/admin/events/${eventId}/end`, {
+          method: "POST",
+          actor: organizer,
+          role: "ORGANIZER",
+        })
+      ).status,
+      403,
     );
-
-    // Filter by AMOUNT_MISMATCH
-    const resMismatch = await adminController.getReconciliations({
-      status: "AMOUNT_MISMATCH",
-    });
-    assert.equal(resMismatch.data.items.length, 1);
     assert.equal(
-      resMismatch.data.items[0]?.reconciliationStatus,
-      ReconciliationStatus.AMOUNT_MISMATCH,
+      (await http(`/admin/events/${otherEvent}/end`, { method: "POST" }))
+        .status,
+      409,
     );
+    assert.equal(
+      (
+        await http("/admin/payouts/generate", {
+          method: "POST",
+          body: { eventId },
+        })
+      ).status,
+      409,
+    );
+    assert.equal(
+      (await http(`/admin/events/${eventId}/end`, { method: "POST" })).status,
+      200,
+    );
+    const empty = await http(`/admin/reconciliations?eventId=${eventId}`);
+    assert.equal((await empty.json()).data.report, null);
   });
 
-  it("7. Organizer can only view their own payouts and enforces IDOR protection", async () => {
-    // Valid organizer A
-    const resA = await organizerController.getOrganizerPayouts(
-      organizerUserA,
-      {},
-    );
-    assert.equal(resA.success, true);
-    assert.equal(resA.data.items.length, 1);
-    assert.equal(resA.data.items[0]?.organizerId, organizerProfileA.id);
-
-    // Rogue user without organizer profile
-    const rogueUser: AuthenticatedUser = {
-      userId: "rogue-user-999",
-      email: "rogue@example.com",
-      role: "BUYER",
-    };
-
-    await assert.rejects(
-      async () => {
-        await organizerController.getOrganizerPayouts(rogueUser, {});
-      },
-      (err: unknown) => {
-        return (
-          err instanceof ForbiddenException &&
-          err.message.includes("ORGANIZER_PROFILE_REQUIRED")
-        );
-      },
-    );
-  });
-
-  it("8. Reconciliations filtering by eventId does NOT treat transactions from other events as orphan transactions", async () => {
-    // When filtering by specific eventId, only transactions of that event should be evaluated
-    const resEvent = await adminController.getReconciliations({
-      eventId: "e0000000-0000-4000-a000-000000000001",
+  it("phân loại sai số, khoản thanh toán thiếu và bản ghi mồ côi, giữ lệnh chi trả", async () => {
+    const first = await reconciliation.importReport(eventId, report);
+    assert.equal(first.discrepancyCount, 0);
+    const create = await http("/admin/payouts/generate", {
+      method: "POST",
+      body: { eventId },
     });
+    assert.equal(create.status, 200);
+    const { data: payout } = await create.json();
+    assert.equal(payout.status, "PENDING");
+    assert.equal(payout.netPayout, 74_500);
 
-    assert.equal(resEvent.success, true);
-    // Should NOT have orphan transactions attached from other events
-    const hasOrphan = resEvent.data.items.some(
-      (item) =>
-        item.reconciliationStatus === ReconciliationStatus.ORPHAN_TRANSACTION,
+    const mismatch = csv(
+      `${paymentRef},${paymentNumber},9000000,01`,
+      "ORPHAN,998,100000,01",
     );
-    assert.equal(hasOrphan, false);
+    assert.equal(
+      (await reconciliation.importReport(eventId, mismatch)).discrepancyCount,
+      3,
+    );
+    assert.equal(
+      (await reconciliation.importReport(eventId, mismatch)).reused,
+      true,
+    );
+    await assert.rejects(
+      reconciliation.importReport(eventId, csv("INVALID,12,0,01")),
+      /INVALID_VNPAY_REPORT_ROW/,
+    );
+    const response = await http(
+      `/admin/reconciliations?eventId=${eventId}&status=ORPHAN_TRANSACTION&limit=1`,
+    );
+    const { data } = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.report.discrepancyCount, 3);
+    assert.equal(data.summary.mismatchedCount, 3);
+    assert.equal(data.items[0].issue, "LOCAL_TRANSACTION_MISSING");
+    assert.equal(data.meta.total, 1);
+    assert.equal(
+      (await http(`/admin/payouts/${payout.id}/approve`, { method: "POST" }))
+        .status,
+      409,
+    );
+    assert.equal(
+      (
+        await http(`/admin/payouts/${payout.id}/release`, {
+          method: "POST",
+          body: { reason: "Đã rà soát" },
+        })
+      ).status,
+      409,
+    );
+    assert.equal(
+      (await reconciliation.importReport(eventId, report)).discrepancyCount,
+      0,
+    );
+    const released = await http(`/admin/payouts/${payout.id}/release`, {
+      method: "POST",
+      body: { reason: "Đã rà soát báo cáo VNPay" },
+    });
+    assert.equal(released.status, 200);
+    assert.equal((await released.json()).data.status, "PENDING");
+  });
+
+  it("chặn dữ liệu hết hiệu lực, duyệt đúng một lần và chỉ hiển thị cho BTC sở hữu", async () => {
+    await db.insert(refunds).values({
+      orderId,
+      amount: "10000",
+      status: "PENDING",
+      reason: "New refund",
+      idempotencyKey: randomUUID(),
+    });
+    const listing = await http(`/admin/payouts?eventId=${eventId}`);
+    const { data } = await listing.json();
+    const payout = data.items[0];
+    assert.equal(
+      (await http(`/admin/payouts/${payout.id}/approve`, { method: "POST" }))
+        .status,
+      409,
+    );
+    assert.equal(
+      (await reconciliation.importReport(eventId, report)).discrepancyCount,
+      1,
+    );
+    await db
+      .delete(refunds)
+      .where(and(eq(refunds.status, "PENDING"), eq(refunds.orderId, orderId)));
+    assert.equal(
+      (await reconciliation.importReport(eventId, report)).discrepancyCount,
+      0,
+    );
+    assert.equal(
+      (
+        await http(`/admin/payouts/${payout.id}/release`, {
+          method: "POST",
+          body: { reason: "Đã giải quyết hoàn tiền" },
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await http(`/admin/payouts/${payout.id}/hold`, {
+          method: "POST",
+          body: { reason: "Khiếu nại đang xử lý" },
+        })
+      ).status,
+      200,
+    );
+    const recalculated = await http(`/admin/payouts/${payout.id}/recalculate`, {
+      method: "POST",
+    });
+    assert.equal(recalculated.status, 200);
+    const held = (await recalculated.json()).data;
+    assert.equal(held.status, "HOLD");
+    assert.equal(held.holdReason, "Khiếu nại đang xử lý");
+    assert.equal(
+      (await http(`/admin/payouts/${payout.id}/approve`, { method: "POST" }))
+        .status,
+      409,
+    );
+    assert.equal(
+      (
+        await http(`/admin/payouts/${payout.id}/release`, {
+          method: "POST",
+          body: { reason: "Khiếu nại đã giải quyết" },
+        })
+      ).status,
+      200,
+    );
+    const responses = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        http(`/admin/payouts/${payout.id}/approve`, { method: "POST" }),
+      ),
+    );
+    assert.deepEqual(responses.map((row) => row.status).sort(), [200, 409]);
+    const logs = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.targetId, payout.id));
+    assert.equal(
+      logs.filter((entry) => entry.action === "APPROVE_PAYOUT").length,
+      1,
+    );
+    assert.equal(
+      (
+        await http(`/admin/payouts/${payout.id}/recalculate`, {
+          method: "POST",
+        })
+      ).status,
+      409,
+    );
+    const owner = await http("/organizer/payouts", {
+      actor: organizer,
+      role: "ORGANIZER",
+    });
+    assert.equal((await owner.json()).data.items[0].status, "PAID_OUT");
+    const other = await http("/organizer/payouts", {
+      actor: otherOrganizer,
+      role: "ORGANIZER",
+    });
+    assert.equal((await other.json()).data.items.length, 0);
+  });
+
+  it("tổng hợp số liệu theo bộ lọc và xuất CSV an toàn", async () => {
+    let refreshed = false;
+    for (let index = 0; index < 10 && !refreshed; index++) {
+      refreshed = await refreshReportViews();
+      if (!refreshed) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.equal(refreshed, true);
+    const date = new Date(now.getTime() + 7 * 3_600_000)
+      .toISOString()
+      .slice(0, 10);
+    const path = `/admin/settlement-report?fromDate=${date}&toDate=${date}&groupBy=city&city=%2BUC11&provider=VNPAY`;
+    const response = await http(path);
+    assert.equal(response.status, 200);
+    const { data } = await response.json();
+    assert.equal(Number(data.items[0].paidRevenue), 100_000);
+    assert.equal(Number(data.items[0].refundedAmount), 20_000);
+    const exported = await http(path + "&format=csv");
+    assert.equal(exported.status, 200);
+    assert.match(exported.headers.get("content-type") ?? "", /^text\/csv/);
+    assert.match(await exported.text(), /"'\+UC11",100000/);
   });
 });

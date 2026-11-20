@@ -43,6 +43,13 @@
       "when": 1793949400863,
       "tag": "0005_integrate-w03-w05",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795167382943,
+      "tag": "0006_thin_pixie",
+      "breakpoints": true
     }
   ]
 }

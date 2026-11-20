@@ -5,12 +5,11 @@ import {
   BadRequestException,
   ForbiddenException,
 } from "@nestjs/common";
-import { and, eq, inArray, ne, sql, desc, count } from "drizzle-orm";
+import { and, eq, sql, desc, count } from "drizzle-orm";
 import { db } from "../database/db";
 import { payouts } from "../database/schema/payouts";
 import { events } from "../database/schema/events";
-import { orders } from "../database/schema/orders";
-import { refunds } from "../database/schema/refunds";
+import { reconciliationReports } from "../database/schema/reconciliation-reports";
 import { auditLog } from "../database/schema/audit-log";
 import { organizerProfiles } from "../database/schema/organizer-profiles";
 import {
@@ -19,142 +18,164 @@ import {
   type PayoutFilterQueryDto,
   type OrganizerPayoutQueryDto,
 } from "@tickethub/shared";
-import { calculatePayout } from "./payout-calculator";
+import {
+  assertSettlementClosed,
+  lockSettlementEvent,
+  readSettlementLedger,
+  type SettlementTransaction,
+} from "./settlement-ledger";
+import type { PayoutCalculationResult } from "./payout-calculator";
+
+function payoutAmounts(calculation: PayoutCalculationResult) {
+  return {
+    totalRevenue: String(calculation.grossRevenue),
+    platformFee: String(calculation.platformFee),
+    gatewayFee: String(calculation.gatewayFee),
+    refundDeduction: String(calculation.refundDeduction),
+    netPayout: String(calculation.netPayout),
+  };
+}
+
+function serializePayout(payout: typeof payouts.$inferSelect) {
+  return {
+    ...payout,
+    totalRevenue: Number(payout.totalRevenue),
+    platformFee: Number(payout.platformFee),
+    gatewayFee: Number(payout.gatewayFee),
+    refundDeduction: Number(payout.refundDeduction),
+    netPayout: Number(payout.netPayout),
+  };
+}
+
+async function settlementState(tx: SettlementTransaction, eventId: string) {
+  const ledger = await readSettlementLedger(tx, eventId);
+  // Các cột payout có kiểu NUMERIC(14,2).
+  if (
+    [ledger.calculation.grossRevenue, ledger.calculation.refundDeduction].some(
+      (amount) => !Number.isSafeInteger(amount) || amount >= 1_000_000_000_000,
+    )
+  )
+    throw new ConflictException("PAYOUT_TOTAL_OUT_OF_RANGE");
+  const [report] = await tx
+    .select({
+      ledgerHash: reconciliationReports.ledgerHash,
+      discrepancyCount: reconciliationReports.discrepancyCount,
+      sourceHash: reconciliationReports.sourceHash,
+    })
+    .from(reconciliationReports)
+    .where(eq(reconciliationReports.eventId, eventId));
+  const verified =
+    report?.ledgerHash === ledger.ledgerHash && report.discrepancyCount === 0;
+  return {
+    amounts: payoutAmounts(ledger.calculation),
+    verified,
+    sourceHash: report?.sourceHash,
+  };
+}
+
+function assertPayable(verified: boolean) {
+  if (!verified)
+    throw new ConflictException("CLEAN_CURRENT_RECONCILIATION_REQUIRED");
+}
 
 @Injectable()
 export class PayoutsService {
-  /**
-   * Tinh toan doanh thu su kien va tao/cap nhat lenh quyet toan
-   */
-  async generatePayout(eventId: string, _adminUserId: string) {
-    const [event] = await db
-      .select({
-        id: events.id,
-        organizerId: events.organizerId,
-        title: events.title,
-      })
-      .from(events)
-      .where(eq(events.id, eventId));
-
-    if (!event) {
-      throw new NotFoundException("EVENT_NOT_FOUND: Không tìm thấy sự kiện");
-    }
-
-    // Kiem tra xem su kien da co lenh quyet toan chua
-    const [existingPayout] = await db
-      .select()
-      .from(payouts)
-      .where(eq(payouts.eventId, eventId));
-
-    if (existingPayout && existingPayout.status === PayoutStatus.PAID_OUT) {
-      throw new ConflictException(
-        "PAYOUT_ALREADY_PAID_OUT: Lệnh chi trả cho sự kiện này đã được thanh toán hoàn tất",
-      );
-    }
-
-    // 1. Tinh tong doanh thu gop ban dau: tat ca don hang thanh cong (PAID va REFUNDED)
-    const paidOrders = await db
-      .select({
-        finalAmount: orders.finalAmount,
-      })
-      .from(orders)
-      .where(
-        and(
-          eq(orders.eventId, eventId),
-          inArray(orders.status, ["PAID", "REFUNDED"]),
-        ),
-      );
-
-    const grossRevenue = paidOrders.reduce(
-      (sum, o) => sum + Number(o.finalAmount || 0),
-      0,
-    );
-
-    // 2. Tinh tong tien hoan vé cua su kien
-    const eventRefunds = await db
-      .select({
-        amount: refunds.amount,
-      })
-      .from(refunds)
-      .innerJoin(orders, eq(refunds.orderId, orders.id))
-      .where(
-        and(
-          eq(orders.eventId, eventId),
-          inArray(refunds.status, ["PENDING", "COMPLETED"]),
-        ),
-      );
-
-    const refundDeduction = eventRefunds.reduce(
-      (sum, r) => sum + Number(r.amount || 0),
-      0,
-    );
-
-    // 3. Tinh toan phan bo tai chinh
-    const calculation = calculatePayout(grossRevenue, refundDeduction);
-
-    if (existingPayout) {
-      // Cap nhat lenh quyet toan hien co (trang thai PENDING hoac HOLD)
-      const [updated] = await db
-        .update(payouts)
+  async closeEvent(eventId: string, adminUserId: string) {
+    return db.transaction(async (tx) => {
+      const event = await lockSettlementEvent(tx, eventId);
+      if (event.status === "ENDED") return { eventId, status: event.status };
+      const now = new Date();
+      if (event.status !== "PUBLISHED" || event.endTime > now) {
+        throw new ConflictException("EVENT_NOT_ELIGIBLE_TO_END");
+      }
+      await tx
+        .update(events)
         .set({
-          totalRevenue: String(calculation.grossRevenue),
-          platformFee: String(calculation.platformFee),
-          gatewayFee: String(calculation.gatewayFee),
-          refundDeduction: String(calculation.refundDeduction),
-          netPayout: String(calculation.netPayout),
-          updatedAt: new Date(),
+          status: "ENDED",
+          version: sql`${events.version} + 1`,
+          updatedAt: now,
         })
-        .where(eq(payouts.id, existingPayout.id))
-        .returning();
-
-      return {
-        ...updated,
-        totalRevenue: Number(updated?.totalRevenue),
-        platformFee: Number(updated?.platformFee),
-        gatewayFee: Number(updated?.gatewayFee),
-        refundDeduction: Number(updated?.refundDeduction),
-        netPayout: Number(updated?.netPayout),
-      };
-    }
-
-    // Tao moi lenh quyet toan
-    const [created] = await db
-      .insert(payouts)
-      .values({
-        organizerId: event.organizerId,
-        eventId: event.id,
-        totalRevenue: String(calculation.grossRevenue),
-        platformFee: String(calculation.platformFee),
-        gatewayFee: String(calculation.gatewayFee),
-        refundDeduction: String(calculation.refundDeduction),
-        netPayout: String(calculation.netPayout),
-        status: PayoutStatus.PENDING,
-      })
-      .returning();
-
-    return {
-      ...created,
-      totalRevenue: Number(created?.totalRevenue),
-      platformFee: Number(created?.platformFee),
-      gatewayFee: Number(created?.gatewayFee),
-      refundDeduction: Number(created?.refundDeduction),
-      netPayout: Number(created?.netPayout),
-    };
+        .where(eq(events.id, eventId));
+      await tx.insert(auditLog).values({
+        actorId: adminUserId,
+        actorRole: UserRole.ADMIN,
+        action: "END_EVENT_FOR_SETTLEMENT",
+        targetType: "EVENT",
+        targetId: eventId,
+        changes: { previousStatus: event.status, newStatus: "ENDED" },
+      });
+      return { eventId, status: "ENDED" as const };
+    });
   }
 
-  /**
-   * Phe duyet lenh chi tra va ghi audit log (cap nhat nguyen tu chong race condition)
-   */
+  async generatePayout(eventId: string, adminUserId: string) {
+    return db.transaction(async (tx) => {
+      const event = await lockSettlementEvent(tx, eventId);
+      assertSettlementClosed(event);
+      const [existing] = await tx
+        .select()
+        .from(payouts)
+        .where(eq(payouts.eventId, eventId))
+        .for("update");
+      if (existing?.status === PayoutStatus.PAID_OUT) {
+        throw new ConflictException("PAYOUT_ALREADY_PAID_OUT");
+      }
+      const { amounts, verified, sourceHash } = await settlementState(
+        tx,
+        eventId,
+      );
+      const status =
+        verified && existing?.status !== PayoutStatus.HOLD
+          ? PayoutStatus.PENDING
+          : PayoutStatus.HOLD;
+      const holdReason =
+        status === PayoutStatus.HOLD
+          ? (existing?.holdReason ?? "Chưa có kết quả đối soát VNPay hợp lệ")
+          : null;
+      const values = { ...amounts, status, holdReason, updatedAt: new Date() };
+      const [saved] = await tx
+        .insert(payouts)
+        .values({
+          ...values,
+          eventId,
+          organizerId: event.organizerId,
+        })
+        .onConflictDoUpdate({ target: payouts.eventId, set: values })
+        .returning();
+      await tx.insert(auditLog).values({
+        actorId: adminUserId,
+        actorRole: UserRole.ADMIN,
+        action: existing ? "RECALCULATE_PAYOUT" : "GENERATE_PAYOUT",
+        targetType: "PAYOUT",
+        targetId: saved!.id,
+        changes: { ...amounts, status, sourceHash: sourceHash ?? null },
+      });
+      return serializePayout(saved!);
+    });
+  }
+
   async approvePayout(
     payoutId: string,
     adminUserId: string,
     ipAddress?: string,
     userAgent?: string,
   ) {
-    const now = new Date();
-
-    return await db.transaction(async (tx) => {
-      // Cap nhat nguyen tu: chi cap nhat neu trang thai chua phai la PAID_OUT
+    return db.transaction(async (tx) => {
+      const payout = await this.lockPayout(tx, payoutId);
+      if (payout.status !== PayoutStatus.PENDING) {
+        throw new ConflictException("ONLY_PENDING_PAYOUT_CAN_BE_APPROVED");
+      }
+      const { verified, amounts, sourceHash } = await settlementState(
+        tx,
+        payout.eventId,
+      );
+      assertPayable(verified);
+      for (const key of Object.keys(amounts) as Array<keyof typeof amounts>) {
+        if (Number(payout[key]) !== Number(amounts[key])) {
+          throw new ConflictException("PAYOUT_AMOUNTS_CHANGED_RECALCULATE");
+        }
+      }
+      const now = new Date();
       const [updated] = await tx
         .update(payouts)
         .set({
@@ -163,31 +184,8 @@ export class PayoutsService {
           paidOutAt: now,
           updatedAt: now,
         })
-        .where(
-          and(
-            eq(payouts.id, payoutId),
-            ne(payouts.status, PayoutStatus.PAID_OUT),
-          ),
-        )
+        .where(eq(payouts.id, payoutId))
         .returning();
-
-      if (!updated) {
-        const [existing] = await tx
-          .select({ status: payouts.status })
-          .from(payouts)
-          .where(eq(payouts.id, payoutId));
-
-        if (!existing) {
-          throw new NotFoundException(
-            "PAYOUT_NOT_FOUND: Không tìm thấy lệnh chi trả",
-          );
-        }
-
-        throw new ConflictException(
-          "PAYOUT_ALREADY_APPROVED: Lệnh chi trả này đã được phê duyệt trước đó",
-        );
-      }
-
       await tx.insert(auditLog).values({
         actorId: adminUserId,
         actorRole: UserRole.ADMIN,
@@ -195,24 +193,74 @@ export class PayoutsService {
         targetType: "PAYOUT",
         targetId: payoutId,
         changes: {
+          ...amounts,
           newStatus: PayoutStatus.PAID_OUT,
-          approvedBy: adminUserId,
           paidOutAt: now.toISOString(),
+          sourceHash,
         },
         ipAddress: ipAddress ?? null,
         userAgent: userAgent ?? null,
       });
-
       return {
-        ...updated,
-        totalRevenue: Number(updated.totalRevenue),
-        platformFee: Number(updated.platformFee),
-        gatewayFee: Number(updated.gatewayFee),
-        refundDeduction: Number(updated.refundDeduction),
-        netPayout: Number(updated.netPayout),
+        ...serializePayout(updated!),
         message: "Lệnh chi trả đã được phê duyệt thành công.",
       };
     });
+  }
+
+  async releasePayout(payoutId: string, reason: string, adminUserId: string) {
+    return db.transaction(async (tx) => {
+      const payout = await this.lockPayout(tx, payoutId);
+      if (payout.status !== PayoutStatus.HOLD) {
+        throw new ConflictException("ONLY_HELD_PAYOUT_CAN_BE_RELEASED");
+      }
+      const { verified, amounts, sourceHash } = await settlementState(
+        tx,
+        payout.eventId,
+      );
+      assertPayable(verified);
+      const [updated] = await tx
+        .update(payouts)
+        .set({
+          ...amounts,
+          status: PayoutStatus.PENDING,
+          holdReason: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(payouts.id, payoutId))
+        .returning();
+      await tx.insert(auditLog).values({
+        actorId: adminUserId,
+        actorRole: UserRole.ADMIN,
+        action: "RELEASE_PAYOUT",
+        targetType: "PAYOUT",
+        targetId: payoutId,
+        changes: {
+          reason,
+          previousHoldReason: payout.holdReason,
+          sourceHash,
+          newStatus: PayoutStatus.PENDING,
+        },
+      });
+      return serializePayout(updated!);
+    });
+  }
+
+  private async lockPayout(tx: SettlementTransaction, payoutId: string) {
+    const [existing] = await tx
+      .select({ eventId: payouts.eventId })
+      .from(payouts)
+      .where(eq(payouts.id, payoutId));
+    if (!existing) throw new NotFoundException("PAYOUT_NOT_FOUND");
+    const event = await lockSettlementEvent(tx, existing.eventId);
+    assertSettlementClosed(event);
+    const [payout] = await tx
+      .select()
+      .from(payouts)
+      .where(eq(payouts.id, payoutId))
+      .for("update");
+    if (!payout) throw new NotFoundException("PAYOUT_NOT_FOUND");
+    return payout;
   }
 
   /**
@@ -228,6 +276,10 @@ export class PayoutsService {
     const now = new Date();
 
     return await db.transaction(async (tx) => {
+      const existing = await this.lockPayout(tx, payoutId);
+      if (existing.status === PayoutStatus.PAID_OUT) {
+        throw new BadRequestException("CANNOT_HOLD_PAID_OUT");
+      }
       const [updated] = await tx
         .update(payouts)
         .set({
@@ -235,30 +287,8 @@ export class PayoutsService {
           holdReason: reason,
           updatedAt: now,
         })
-        .where(
-          and(
-            eq(payouts.id, payoutId),
-            ne(payouts.status, PayoutStatus.PAID_OUT),
-          ),
-        )
+        .where(eq(payouts.id, payoutId))
         .returning();
-
-      if (!updated) {
-        const [existing] = await tx
-          .select({ status: payouts.status })
-          .from(payouts)
-          .where(eq(payouts.id, payoutId));
-
-        if (!existing) {
-          throw new NotFoundException(
-            "PAYOUT_NOT_FOUND: Không tìm thấy lệnh chi trả",
-          );
-        }
-
-        throw new BadRequestException(
-          "CANNOT_HOLD_PAID_OUT: Không thể tạm giữ lệnh chi trả đã hoàn tất",
-        );
-      }
 
       await tx.insert(auditLog).values({
         actorId: adminUserId,
@@ -274,14 +304,7 @@ export class PayoutsService {
         userAgent: userAgent ?? null,
       });
 
-      return {
-        ...updated,
-        totalRevenue: Number(updated.totalRevenue),
-        platformFee: Number(updated.platformFee),
-        gatewayFee: Number(updated.gatewayFee),
-        refundDeduction: Number(updated.refundDeduction),
-        netPayout: Number(updated.netPayout),
-      };
+      return serializePayout(updated!);
     });
   }
 

@@ -1,5 +1,6 @@
 import {
   Controller,
+  Inject,
   Get,
   Query,
   UseGuards,
@@ -21,7 +22,9 @@ import { UserRole, OrganizerPayoutQuerySchema } from "@tickethub/shared";
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ORGANIZER)
 export class OrganizerPayoutsController {
-  constructor(private readonly payoutsService: PayoutsService) {}
+  constructor(
+    @Inject(PayoutsService) private readonly payoutsService: PayoutsService,
+  ) {}
 
   // GET /api/v1/organizer/payouts
   // Danh sach quyet toan danh cho ban to chuc

@@ -56,7 +56,7 @@ export class VnpayGateway implements PaymentGateway {
     request: CreatePaymentRequest,
   ): Promise<CreatePaymentResult> {
     if (!hasValidConfig()) {
-      throw new Error("VNPay Sandbox credentials not configured");
+      throw new Error("VNPay merchant credentials not configured");
     }
 
     if (

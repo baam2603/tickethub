@@ -1,18 +1,20 @@
 import {
   Controller,
+  Inject,
   Get,
   Post,
   Param,
   Query,
   Body,
   Req,
+  Res,
   UseGuards,
   ParseUUIDPipe,
   BadRequestException,
   HttpCode,
   HttpStatus,
 } from "@nestjs/common";
-import type { FastifyRequest } from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import { PayoutsService } from "./payouts.service";
 import { ReconciliationsService } from "./reconciliations.service";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
@@ -30,12 +32,14 @@ import {
   HoldPayoutSchema,
 } from "@tickethub/shared";
 
+import {
+  AdminSettlementReportQuery,
+  readAdminSettlementReport,
+  toAdminSettlementCsv,
+} from "../reporting/admin-settlement-report";
+
 function extractAuditMeta(req: FastifyRequest) {
-  const forwarded = req.headers["x-forwarded-for"];
-  const ipAddress =
-    typeof forwarded === "string"
-      ? forwarded.split(",")[0]?.trim()
-      : req.ip || null;
+  const ipAddress = req.ip || null;
   const userAgent =
     typeof req.headers["user-agent"] === "string"
       ? req.headers["user-agent"].slice(0, 255)
@@ -49,7 +53,8 @@ function extractAuditMeta(req: FastifyRequest) {
 @Roles(UserRole.ADMIN)
 export class AdminPayoutsController {
   constructor(
-    private readonly payoutsService: PayoutsService,
+    @Inject(PayoutsService) private readonly payoutsService: PayoutsService,
+    @Inject(ReconciliationsService)
     private readonly reconciliationsService: ReconciliationsService,
   ) {}
 
@@ -79,6 +84,44 @@ export class AdminPayoutsController {
       success: true,
       data,
     };
+  }
+
+  @Get("settlement-report")
+  async getSettlementReport(
+    @Query() query: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const parsed = AdminSettlementReportQuery.safeParse(query);
+    if (!parsed.success)
+      throw new BadRequestException("INVALID_SETTLEMENT_REPORT_QUERY");
+    const items = await readAdminSettlementReport(parsed.data);
+    if (parsed.data.format === "csv") {
+      reply
+        .type("text/csv; charset=utf-8")
+        .header(
+          "Content-Disposition",
+          "attachment; filename=settlement-report.csv",
+        );
+      return toAdminSettlementCsv(items);
+    }
+    return {
+      success: true,
+      data: {
+        items,
+        groupBy: parsed.data.groupBy,
+        timezone: "Asia/Ho_Chi_Minh",
+      },
+    };
+  }
+
+  @Post("events/:id/end")
+  @HttpCode(HttpStatus.OK)
+  async endEvent(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const data = await this.payoutsService.closeEvent(id, user.userId);
+    return { success: true, data };
   }
 
   // GET /api/v1/admin/payouts
@@ -200,6 +243,24 @@ export class AdminPayoutsController {
       success: true,
       data,
     };
+  }
+
+  @Post("payouts/:id/release")
+  @HttpCode(HttpStatus.OK)
+  async releasePayout(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: unknown,
+  ) {
+    const parsed = HoldPayoutSchema.safeParse(body);
+    if (!parsed.success)
+      throw new BadRequestException("INVALID_RELEASE_REASON");
+    const data = await this.payoutsService.releasePayout(
+      id,
+      parsed.data.reason,
+      user.userId,
+    );
+    return { success: true, data };
   }
 
   // POST /api/v1/admin/payouts/:id/recalculate

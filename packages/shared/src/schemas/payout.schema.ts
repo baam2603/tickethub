@@ -23,7 +23,7 @@ export const ReconciliationQuerySchema = z.object({
     .enum(["ALL", ...ReconciliationStatusEnum])
     .optional()
     .default("ALL"),
-  page: z.coerce.number().int().positive().optional().default(1),
+  page: z.coerce.number().int().positive().max(1_000_000).optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 
@@ -36,7 +36,11 @@ export const GeneratePayoutSchema = z.object({
 export type GeneratePayoutDto = z.infer<typeof GeneratePayoutSchema>;
 
 export const HoldPayoutSchema = z.object({
-  reason: z.string().min(1, "Lý do tạm giữ không được để trống").max(500),
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Lý do tạm giữ không được để trống")
+    .max(500),
 });
 
 export type HoldPayoutDto = z.infer<typeof HoldPayoutSchema>;
@@ -45,14 +49,14 @@ export const PayoutFilterQuerySchema = z.object({
   status: z.enum(["PENDING", "HOLD", "PAID_OUT"]).optional(),
   organizerId: z.string().uuid().optional(),
   eventId: z.string().uuid().optional(),
-  page: z.coerce.number().int().positive().optional().default(1),
+  page: z.coerce.number().int().positive().max(1_000_000).optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 
 export type PayoutFilterQueryDto = z.infer<typeof PayoutFilterQuerySchema>;
 
 export const OrganizerPayoutQuerySchema = z.object({
-  page: z.coerce.number().int().positive().optional().default(1),
+  page: z.coerce.number().int().positive().max(1_000_000).optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 

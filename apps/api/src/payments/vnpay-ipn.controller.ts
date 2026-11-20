@@ -2,11 +2,15 @@ import {
   Controller,
   Get,
   Inject,
-  Logger,
   NotFoundException,
   Query,
+  Req,
 } from "@nestjs/common";
 
+import type { FastifyRequest } from "fastify";
+import { env } from "../config/env.config";
+import { isAllowedIp, parseIpAllowlist } from "../config/ip-allowlist";
+import { paymentSignal } from "../monitoring/payment-monitoring";
 import { VnpayIpnService } from "./vnpay-ipn.service";
 import type { IpnDecision } from "./vnpay-ipn.decision";
 
@@ -36,7 +40,9 @@ export function toVnpayResponse(decision: IpnDecision) {
 
 @Controller("api/v1/payments/vnpay")
 export class VnpayIpnController {
-  private readonly logger = new Logger(VnpayIpnController.name);
+  private readonly allowedSources = parseIpAllowlist(
+    env.VNPAY_IPN_ALLOWED_CIDRS,
+  );
 
   constructor(
     @Inject(VnpayIpnService)
@@ -44,10 +50,19 @@ export class VnpayIpnController {
   ) {}
 
   @Get("ipn")
-  async receive(@Query() query: Record<string, unknown>) {
+  async receive(
+    @Query() query: Record<string, unknown>,
+    @Req() request?: FastifyRequest,
+  ) {
     // VNPay IPN chi duoc xu ly khi feature flag duoc bat.
     // Mac dinh tat tren tat ca moi truong.
     if (process.env.ENABLE_VNPAY_IPN_PROCESSING !== "true") {
+      throw new NotFoundException();
+    }
+    if (
+      env.NODE_ENV === "production" &&
+      !isAllowedIp(this.allowedSources, request?.ip)
+    ) {
       throw new NotFoundException();
     }
     const params: Record<string, string> = {};
@@ -63,18 +78,13 @@ export class VnpayIpnController {
     try {
       const decision = await this.ipnService.process(params);
 
-      if (decision === "MANUAL_REVIEW") {
-        this.logger.warn(
-          `VNPay transaction needs review: ${params.vnp_TxnRef ?? "unknown"}`,
-        );
+      if (decision === "MANUAL_REVIEW" || decision === "AMOUNT_MISMATCH") {
+        paymentSignal("vnpay.ipn.review_required", "warning", { decision });
       }
 
       return toVnpayResponse(decision);
-    } catch (error) {
-      this.logger.error(
-        "VNPay IPN processing failed",
-        error instanceof Error ? error.stack : String(error),
-      );
+    } catch {
+      paymentSignal("vnpay.ipn.processing_failed", "error");
 
       return {
         RspCode: "99",

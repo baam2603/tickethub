@@ -14,12 +14,7 @@ import {
 } from "../database/schema";
 import { REPORT_READY } from "./report-notifications";
 import { readReport, refreshReportViews } from "./report-data";
-import { exportFilePath, reportDirectory } from "./export-files";
-function csvCell(value: unknown) {
-  const raw = String(value ?? "");
-  const safe = /^\s*[=+\-@]/.test(raw) ? `'${raw}` : raw;
-  return `"${safe.replaceAll('"', '""')}"`;
-}
+import { csvCell, exportFilePath, reportDirectory } from "./export-files";
 export async function processReportExport(targetId?: string) {
   const job = await db.transaction(async (tx) => {
     const [found] = await tx

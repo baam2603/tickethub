@@ -1,3 +1,4 @@
+import { paymentSignal } from "../monitoring/payment-monitoring";
 import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { OutboxStatus } from "@tickethub/shared";
@@ -107,7 +108,7 @@ export async function processPaymentOutboxOnce(
             ),
           );
     }
-    await db
+    const [updated] = await db
       .update(outbox)
       .set({
         status: retries >= 8 ? OutboxStatus.FAILED : OutboxStatus.PENDING,
@@ -123,7 +124,14 @@ export async function processPaymentOutboxOnce(
           eq(outbox.status, OutboxStatus.PROCESSING),
           eq(outbox.updatedAt, event.updatedAt),
         ),
-      );
+      )
+      .returning({ id: outbox.id });
+    if (updated && retries >= 8) {
+      paymentSignal("payment.outbox.manual_review", "error", {
+        eventType: event.eventType,
+        retries,
+      });
+    }
   }
   return true;
 }
