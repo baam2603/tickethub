@@ -13,6 +13,7 @@ import type {
 
 /** Thao tac ghi trong mot Database Transaction duy nhat cua luong giu cho / huy / quet het han. */
 export interface BookingTransaction {
+  lockEventForBooking(eventId: string): Promise<{ status: string } | null>;
   // --- Giu cho ---
   /** Khoa ghe chi dinh theo id tang dan (FOR UPDATE). */
   lockSeatsById(

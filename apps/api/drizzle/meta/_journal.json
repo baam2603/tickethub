@@ -43,6 +43,13 @@
       "when": 1794445981571,
       "tag": "0005_goofy_ken_ellis",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795187837028,
+      "tag": "0006_w06_settlement",
+      "breakpoints": true
     }
   ]
 }

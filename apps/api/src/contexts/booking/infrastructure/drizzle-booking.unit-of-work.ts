@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { OrderStatus, OutboxStatus, SeatStatus } from "@tickethub/shared";
 import { db } from "../../../database/db";
 import {
+  events,
   orderItems,
   orders,
   outbox,
@@ -48,6 +49,15 @@ const candidateColumns = {
 
 class DrizzleBookingTransaction implements BookingTransaction {
   constructor(private readonly tx: DbTx) {}
+
+  async lockEventForBooking(eventId: string) {
+    const [event] = await this.tx
+      .select({ status: events.status })
+      .from(events)
+      .where(eq(events.id, eventId))
+      .for("share");
+    return event ?? null;
+  }
 
   lockSeatsById(
     eventId: string,

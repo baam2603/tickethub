@@ -1,3 +1,5 @@
+import { parseIpAllowlist, isAllowedIp } from "./config/ip-allowlist";
+import { initializePaymentMonitoring } from "./shared-kernel/payment-monitoring";
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import {
@@ -9,10 +11,21 @@ import { AppModule } from "./app.module";
 import { env } from "./config/env.config";
 
 async function bootstrap() {
+  initializePaymentMonitoring();
+  const trusted = parseIpAllowlist(env.TRUSTED_PROXY_CIDRS);
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      logger: env.NODE_ENV !== "production",
+      trustProxy: (ip) => isAllowedIp(trusted, ip),
+      logger: {
+        serializers: {
+          req: (request: { method?: string; url?: string; ip?: string }) => ({
+            method: request.method ?? "",
+            url: request.url?.split("?")[0] ?? "",
+            remoteAddress: request.ip ?? "",
+          }),
+        },
+      },
     }),
   );
 

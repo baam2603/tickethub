@@ -1,3 +1,4 @@
+import { ActiveSettlementAdminGuard } from "./active-settlement-admin.guard";
 import {
   Controller,
   Get,
@@ -34,11 +35,7 @@ import {
 } from "@tickethub/shared";
 
 function extractAuditMeta(req: FastifyRequest) {
-  const forwarded = req.headers["x-forwarded-for"];
-  const ipAddress =
-    typeof forwarded === "string"
-      ? forwarded.split(",")[0]?.trim()
-      : req.ip || null;
+  const ipAddress = req.ip || null;
   const userAgent =
     typeof req.headers["user-agent"] === "string"
       ? req.headers["user-agent"].slice(0, 255)
@@ -48,7 +45,7 @@ function extractAuditMeta(req: FastifyRequest) {
 }
 
 @Controller("api/v1/admin")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ActiveSettlementAdminGuard)
 @Roles(UserRole.ADMIN)
 export class AdminPayoutsController {
   constructor(

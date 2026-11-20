@@ -86,6 +86,7 @@ export class BookingCommands {
     const sortedExplicitSeatIds = [...explicitSeatIds].sort();
 
     const result = await this.unitOfWork.run(async (tx) => {
+      assertEventOnSale(await tx.lockEventForBooking(dto.eventId));
       const now = new Date();
       const expiresAt = new Date(now.getTime() + HOLD_DURATION_MS);
       const draft = new HoldDraft();
