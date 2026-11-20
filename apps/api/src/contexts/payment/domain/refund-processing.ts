@@ -2,7 +2,7 @@ import { OrderStatus } from "@tickethub/shared";
 import type { RefundTransactionType } from "./refund-gateway";
 import { formatVnpayDate } from "./vnpay-date";
 
-export const MAX_REFUND_ATTEMPTS = 5;
+export const MAX_REFUND_ATTEMPTS = 3;
 export const REFUND_RETRY_BASE_MS = 30_000;
 
 /** Hoan toan phan (02) khi hoan het mot lan; hoan mot phan (03) cac truong hop con lai. */

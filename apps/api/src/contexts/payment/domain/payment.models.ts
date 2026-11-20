@@ -26,6 +26,7 @@ export interface PendingVnpayTransaction {
   transactionRef: string;
   status: TransactionStatus;
   amount: string;
+  paymentUrl: string | null;
 }
 
 export interface SettlementItem {

@@ -1,3 +1,4 @@
+import { QueryVnpayPaymentUseCase } from "./application/query-vnpay-payment.use-case";
 import { Module } from "@nestjs/common";
 import { EventModule } from "../event/event.module";
 import { EventReadModel } from "../event/application/event-read-model";
@@ -33,6 +34,11 @@ type PaymentUseCases = ReturnType<typeof createPaymentUseCases>;
     {
       provide: CreateVnpayPaymentUseCase,
       useFactory: (u: PaymentUseCases) => u.createPayment,
+      inject: [PAYMENT_USE_CASES],
+    },
+    {
+      provide: QueryVnpayPaymentUseCase,
+      useFactory: (u: PaymentUseCases) => u.queryVnpay,
       inject: [PAYMENT_USE_CASES],
     },
     {

@@ -37,18 +37,27 @@ export class ProcessVnpayIpnUseCase {
       return "INVALID_SIGNATURE";
     }
 
-    // Giao dich do Backend tao truoc khi thanh toan
-    const existing = await this.query.findVnpayTransactionByRef(
-      verified.transactionRef,
-    );
-    if (!existing) return "ORDER_NOT_FOUND";
-
     if (!isFinalCallback(params)) return "MANUAL_REVIEW";
+    return this.settleVerified(
+      params,
+      verified.transactionRef,
+      verified.success,
+    );
+  }
+
+  async settleVerified(
+    params: VnpayParams,
+    transactionRef: string,
+    success: boolean,
+  ): Promise<IpnDecision> {
+    // Giao dich do Backend tao truoc khi thanh toan
+    const existing = await this.query.findVnpayTransactionByRef(transactionRef);
+    if (!existing) return "ORDER_NOT_FOUND";
 
     const decision = await this.unitOfWork.run((tx) =>
       this.settle(tx, existing.id, existing.orderId, params, {
-        success: verified.success,
-        providerTransactionId: verified.providerTransactionId ?? null,
+        success,
+        providerTransactionId: params.vnp_TransactionNo ?? null,
       }),
     );
 

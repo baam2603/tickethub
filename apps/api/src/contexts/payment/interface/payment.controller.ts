@@ -1,6 +1,10 @@
+import { QueryVnpayPaymentUseCase } from "../application/query-vnpay-payment.use-case";
 import {
   Controller,
   Post,
+  Get,
+  Header,
+  Headers,
   Param,
   ParseUUIDPipe,
   Ip,
@@ -23,6 +27,8 @@ export class PaymentController {
   constructor(
     @Inject(CreateVnpayPaymentUseCase)
     private readonly createPaymentUseCase: CreateVnpayPaymentUseCase,
+    @Inject(QueryVnpayPaymentUseCase)
+    private readonly queryVnpay: QueryVnpayPaymentUseCase,
   ) {}
 
   @Post("orders/:orderId/vnpay")
@@ -30,14 +36,47 @@ export class PaymentController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("orderId", new ParseUUIDPipe()) orderId: string,
     @Ip() clientIp: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const data = await mapPaymentErrors(() =>
-      this.createPaymentUseCase.execute(user.userId, orderId, clientIp),
+      this.createPaymentUseCase.execute(
+        user.userId,
+        orderId,
+        clientIp,
+        idempotencyKey,
+      ),
     );
 
     return {
       success: true,
       data,
+    };
+  }
+  @Get("vnpay/status/:transactionRef")
+  @Header("Cache-Control", "private, no-store")
+  async status(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("transactionRef") ref: string,
+  ) {
+    return {
+      success: true,
+      data: await mapPaymentErrors(() =>
+        this.queryVnpay.status(user.userId, ref),
+      ),
+    };
+  }
+
+  @Post("orders/:orderId/vnpay/query")
+  async reconcile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Ip() clientIp: string,
+  ) {
+    return {
+      success: true,
+      data: await mapPaymentErrors(() =>
+        this.queryVnpay.reconcile(user.userId, orderId, clientIp),
+      ),
     };
   }
 }

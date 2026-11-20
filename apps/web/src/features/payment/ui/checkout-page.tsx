@@ -15,6 +15,17 @@ function CheckoutContent() {
   const vm = useCheckoutScreen();
   const { showPaymentModal, showInfoModal, isExpired, showCancelModal } = vm;
 
+  if (!vm.hasOrder)
+    return (
+      <main className="mx-auto max-w-lg px-6 py-16">
+        <h1 className="text-xl font-semibold">Thanh toán</h1>
+        <p className="mt-3" role="status">
+          {vm.isLoading
+            ? "Đang tải đơn hàng..."
+            : (vm.orderError ?? "Hãy chọn vé trước khi thanh toán.")}
+        </p>
+      </main>
+    );
   return (
     <div className="min-h-screen bg-background text-foreground font-sans antialiased flex flex-col justify-between">
       <CheckoutHeader vm={vm} />

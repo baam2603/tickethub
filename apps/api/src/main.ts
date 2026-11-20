@@ -1,3 +1,4 @@
+import type { FastifyRequest } from "fastify";
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import {
@@ -12,7 +13,24 @@ async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      logger: env.NODE_ENV !== "production",
+      logger:
+        env.NODE_ENV === "production"
+          ? false
+          : {
+              serializers: {
+                req(request: FastifyRequest) {
+                  const path = request.url?.split("?", 1)[0];
+                  const callback =
+                    path === "/api/v1/payments/vnpay/ipn" ||
+                    path === "/api/v1/internal/vnpay/ipn-preview";
+                  return {
+                    method: request.method,
+                    url: callback ? path : request.url,
+                    remoteAddress: request.ip,
+                  };
+                },
+              },
+            },
     }),
   );
 

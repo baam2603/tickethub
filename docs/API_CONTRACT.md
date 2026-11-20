@@ -527,6 +527,14 @@ Khởi tạo giao dịch thanh toán VNPay và nhận URL chuyển hướng đ�
   }
   ```
 
+#### `GET /api/v1/payments/vnpay/status/:transactionRef`
+
+Yêu cầu Bearer token của chủ đơn. Đọc `orderId`, `orderCode`, `orderStatus` và `transactionStatus` từ PostgreSQL theo mã `vnp_TxnRef`. Mã không thuộc tài khoản trả 404. Endpoint chỉ đọc và bỏ qua kết quả do trình duyệt gửi.
+
+#### `POST /api/v1/payments/orders/:orderId/vnpay/query`
+
+Yêu cầu Bearer token của chủ đơn. Backend gọi QueryDR với ngày tạo giao dịch gốc. Chỉ phản hồi đúng chữ ký, merchant, mã tham chiếu, loại thanh toán và số tiền mới được đưa vào luồng xử lý trạng thái. Trả 503 khi phản hồi không thể xác minh hoặc VNPay không phản hồi.
+
 #### `GET /api/v1/payments/vnpay/ipn`
 
 Endpoint nhận webhook IPN (Instant Payment Notification) từ cổng thanh toán VNPay để cập nhật trạng thái đơn hàng thành công.

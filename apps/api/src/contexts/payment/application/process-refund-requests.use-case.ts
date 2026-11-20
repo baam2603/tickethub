@@ -45,6 +45,13 @@ export class ProcessRefundRequestsUseCase {
     private readonly gateway: RefundGateway,
     private readonly config: RefundProcessorConfig,
     private readonly logger: ProcessLogger,
+    private readonly query?: {
+      queryTransaction(input: {
+        transactionRef: string;
+        transactionDate: string;
+        ipAddress: string;
+      }): Promise<Record<string, string>>;
+    },
   ) {}
 
   async run(limit = 10): Promise<RefundRunResult> {
@@ -101,7 +108,7 @@ export class ProcessRefundRequestsUseCase {
       return "failed";
     }
 
-    const ctx = await this.store.loadContext(payload);
+    const ctx = await this.store.loadContext(payload, event.verifying);
     if (!ctx || ctx.pendingRefunds.length !== payload.refundIds.length) {
       await this.store.failEvent(
         event.id,
@@ -123,6 +130,7 @@ export class ProcessRefundRequestsUseCase {
 
     // Danh dau PROCESSING truoc khi goi VNPay: neu tien trinh chet giua chung se khong bi gui lai
     if (
+      !event.verifying &&
       !(await this.store.markRefundsProcessing(payload.refundIds, new Date()))
     ) {
       await this.store.failEvent(
@@ -133,7 +141,7 @@ export class ProcessRefundRequestsUseCase {
       return "failed";
     }
 
-    const gatewayResult = await this.gateway.refund({
+    const request = {
       requestId: event.id.replace(/-/g, ""),
       transactionType: refundTransactionType(payload.isPartial),
       transactionRef: ctx.transaction.transactionRef,
@@ -144,9 +152,12 @@ export class ProcessRefundRequestsUseCase {
       ),
       transactionNo: ctx.transaction.providerTxNumber ?? "0",
       createBy: this.config.createBy,
-      orderInfo: refundOrderInfo(ctx.order.orderCode),
+      orderInfo: refundOrderInfo(event.id.replace(/-/g, "")),
       ipAddress: this.config.ipAddress,
-    });
+    };
+    const gatewayResult = event.verifying
+      ? await this.verifyRefund(request)
+      : await this.gateway.refund(request);
 
     switch (gatewayResult.kind) {
       case "SUCCESS":
@@ -191,7 +202,25 @@ export class ProcessRefundRequestsUseCase {
         return giveUp ? "failed" : "retried";
       }
 
-      default:
+      default: {
+        const attempts = event.retryCount + 1;
+        if (this.query && this.store.scheduleVerification) {
+          if (shouldRetryRefund(attempts)) {
+            await this.store.scheduleVerification(
+              event.id,
+              attempts,
+              new Date(Date.now() + refundRetryDelayMs(attempts)),
+            );
+            return "retried";
+          }
+          await this.store.failEvent(
+            event.id,
+            "REFUND_QUERYDR_MANUAL_REVIEW",
+            new Date(),
+          );
+          this.logger.error(`[Refund] Manual review required: ${event.id}`);
+          return "failed";
+        }
         await this.store.annotateUncertain(
           event.id,
           `Uncertain outcome, manual reconciliation required: ${gatewayResult.reason}`,
@@ -201,6 +230,34 @@ export class ProcessRefundRequestsUseCase {
           `[Refund] Uncertain outcome ${event.id}: ${gatewayResult.reason}. NOT retrying automatically`,
         );
         return "uncertain";
+      }
     }
+  }
+  private async verifyRefund(
+    request: Parameters<RefundGateway["refund"]>[0],
+  ): ReturnType<RefundGateway["refund"]> {
+    try {
+      const result = await this.query?.queryTransaction(request);
+      if (
+        result?.vnp_ResponseCode === "00" &&
+        result.vnp_TransactionStatus === "00" &&
+        result.vnp_TransactionType === request.transactionType &&
+        result.vnp_Amount === String(request.amountVnd * 100) &&
+        (request.transactionType !== "03" ||
+          result.vnp_OrderInfo === request.orderInfo) &&
+        /^\d{1,15}$/.test(result.vnp_TransactionNo ?? "")
+      ) {
+        return {
+          kind: "SUCCESS",
+          providerRefundRef: result.vnp_TransactionNo!,
+        };
+      }
+    } catch {
+      // Chưa xác minh được kết quả. Không gọi lại Refund.
+    }
+    return {
+      kind: "UNKNOWN",
+      reason: "Refund requires verified QueryDR evidence",
+    };
   }
 }

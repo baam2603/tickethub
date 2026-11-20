@@ -21,7 +21,7 @@ import type { CheckoutScreen } from "./use-checkout-screen";
 /** Bo cuc 2 cot: tom tat su kien va ve (60%), chi phi va hanh dong (40%). */
 export function CheckoutMain({ vm }: { vm: CheckoutScreen }) {
   const {
-    isExpired,
+    canPay,
     setShowPaymentModal,
     carouselImages,
     currentSlide,
@@ -29,7 +29,6 @@ export function CheckoutMain({ vm }: { vm: CheckoutScreen }) {
     voucherDiscount,
     voucherAppliedCode,
     subtotal,
-    platformFee,
     finalTotal,
     ticketItem,
   } = vm;
@@ -271,14 +270,6 @@ export function CheckoutMain({ vm }: { vm: CheckoutScreen }) {
                 </span>
               </div>
 
-              {/* Service fee row */}
-              <div className="flex justify-between text-xs sm:text-sm text-muted-foreground">
-                <span>Phí dịch vụ nền tảng</span>
-                <span className="font-medium text-foreground">
-                  {platformFee.toLocaleString("vi-VN")} ₫
-                </span>
-              </div>
-
               {/* Voucher Discount if applied */}
               {voucherDiscount > 0 && (
                 <div className="flex justify-between text-xs sm:text-sm text-primary font-semibold">
@@ -308,7 +299,7 @@ export function CheckoutMain({ vm }: { vm: CheckoutScreen }) {
               <Button
                 type="button"
                 onClick={() => setShowPaymentModal(true)}
-                disabled={isExpired}
+                disabled={!canPay}
                 className="w-full h-11 sm:h-12 text-sm sm:text-base font-bold bg-primary text-primary-foreground hover:bg-primary/90 rounded-md shadow-xs flex items-center justify-center gap-2 cursor-pointer mt-2"
               >
                 <span>Tiếp tục</span>

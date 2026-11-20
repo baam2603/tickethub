@@ -143,6 +143,7 @@ export class VnpayRefundGateway implements RefundGateway {
     try {
       response = await this.fetchImpl(this.config.apiUrl, {
         method: "POST",
+        redirect: "error",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -177,16 +178,33 @@ export class VnpayRefundGateway implements RefundGateway {
         reason: "Response signature is missing or invalid",
       };
     }
-    if (payload.vnp_TxnRef !== request.transactionRef) {
+    if (
+      payload.vnp_TxnRef !== request.transactionRef ||
+      payload.vnp_TmnCode !== this.config.tmnCode ||
+      payload.vnp_Command !== "refund"
+    ) {
       return {
         kind: "UNKNOWN",
         reason: "Response does not match the requested transaction",
       };
     }
 
-    const code = String(payload.vnp_ResponseCode ?? "");
+    const code = String(payload.vnp_ResponseCode ?? "").padStart(2, "0");
     if (code === "00") {
-      const ref = String(payload.vnp_TransactionNo ?? request.requestId);
+      const ref = String(payload.vnp_TransactionNo ?? "");
+      if (
+        String(payload.vnp_TransactionStatus).padStart(2, "0") !== "00" ||
+        String(payload.vnp_TransactionType).padStart(2, "0") !==
+          request.transactionType ||
+        String(payload.vnp_Amount) !== amount ||
+        !/^\d{1,15}$/.test(ref) ||
+        (request.transactionType === "03" &&
+          payload.vnp_OrderInfo !== request.orderInfo)
+      )
+        return {
+          kind: "UNKNOWN",
+          reason: "Refund confirmation is incomplete or inconsistent",
+        };
       return { kind: "SUCCESS", providerRefundRef: ref };
     }
     if (DEFINITIVE_REJECTION_CODES.has(code)) {

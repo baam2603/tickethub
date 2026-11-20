@@ -64,19 +64,19 @@ export class VnpayIpnController {
     try {
       const decision = await this.ipnService.process(params);
 
-      if (decision === "MANUAL_REVIEW") {
+      if (
+        ["MANUAL_REVIEW", "INVALID_SIGNATURE", "AMOUNT_MISMATCH"].includes(
+          decision,
+        )
+      )
         this.logger.warn(
-          `VNPay transaction needs review: ${params.vnp_TxnRef ?? "unknown"}`,
+          JSON.stringify({ event: "vnpay.ipn.review_required", decision }),
         );
-      }
-
       return toVnpayResponse(decision);
-    } catch (error) {
+    } catch {
       this.logger.error(
-        "VNPay IPN processing failed",
-        error instanceof Error ? error.stack : String(error),
+        JSON.stringify({ event: "vnpay.ipn.processing_failed" }),
       );
-
       return {
         RspCode: "99",
         Message: "Unknown error",

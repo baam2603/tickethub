@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import {
   OrderStatus,
   OutboxStatus,
@@ -7,6 +7,7 @@ import {
 } from "@tickethub/shared";
 import { db } from "../../../database/db";
 import {
+  auditLog,
   orders,
   outbox,
   refunds,
@@ -28,6 +29,7 @@ export class DrizzleRefundProcessingStore implements RefundProcessingStore {
         id: outbox.id,
         payload: outbox.payload,
         retryCount: outbox.retryCount,
+        verifying: sql<boolean>`coalesce(${outbox.errorMessage} = 'REFUND_QUERYDR_PENDING', false)`,
       })
       .from(outbox)
       .where(
@@ -59,6 +61,7 @@ export class DrizzleRefundProcessingStore implements RefundProcessingStore {
 
   async loadContext(
     payload: RefundRequestedPayload,
+    verifying = false,
   ): Promise<RefundOrderContext | null> {
     const [order] = await db
       .select({
@@ -71,7 +74,7 @@ export class DrizzleRefundProcessingStore implements RefundProcessingStore {
       .limit(1);
     if (!order) return null;
 
-    const [tx] = await db
+    const [tx, duplicate] = await db
       .select({
         transactionRef: transactions.transactionRef,
         providerTxNumber: transactions.providerTxNumber,
@@ -83,10 +86,12 @@ export class DrizzleRefundProcessingStore implements RefundProcessingStore {
         and(
           eq(transactions.orderId, payload.orderId),
           eq(transactions.status, TransactionStatus.SUCCESS),
+          eq(transactions.provider, "VNPAY"),
         ),
       )
-      .limit(1);
-    if (!tx) return null;
+      .limit(2);
+    if (!tx || duplicate || !/^\d{1,15}$/.test(tx.providerTxNumber ?? ""))
+      return null;
 
     const pendingRefunds = await db
       .select({ id: refunds.id, amount: refunds.amount })
@@ -95,7 +100,10 @@ export class DrizzleRefundProcessingStore implements RefundProcessingStore {
         and(
           inArray(refunds.id, payload.refundIds),
           eq(refunds.orderId, payload.orderId),
-          eq(refunds.status, RefundStatus.PENDING),
+          eq(
+            refunds.status,
+            verifying ? RefundStatus.PROCESSING : RefundStatus.PENDING,
+          ),
         ),
       );
 
@@ -106,30 +114,68 @@ export class DrizzleRefundProcessingStore implements RefundProcessingStore {
     refundIds: string[],
     now: Date,
   ): Promise<boolean> {
-    const updated = await db
-      .update(refunds)
-      .set({ status: RefundStatus.PROCESSING, updatedAt: now })
-      .where(
-        and(
-          inArray(refunds.id, refundIds),
-          eq(refunds.status, RefundStatus.PENDING),
-        ),
-      )
-      .returning({ id: refunds.id });
-    if (updated.length === refundIds.length) return true;
-    // Khong hoan nguyen duoc mot phan: tra cac dong vua doi ve PENDING
-    if (updated.length > 0) {
-      await db
-        .update(refunds)
-        .set({ status: RefundStatus.PENDING, updatedAt: now })
+    return db.transaction(async (tx) => {
+      const [first] = await tx
+        .select({ orderId: refunds.orderId })
+        .from(refunds)
+        .where(eq(refunds.id, refundIds[0]!));
+      if (!first) return false;
+      await tx
+        .select({ id: orders.id })
+        .from(orders)
+        .where(eq(orders.id, first.orderId))
+        .for("update");
+      const [safety] = await tx.execute<{ safe: boolean }>(sql`
+        SELECT
+          NOT EXISTS (
+            SELECT 1 FROM refunds WHERE order_id = ${first.orderId} AND status = 'PROCESSING'
+          ) AND
+          (SELECT coalesce(sum(amount), 0) FROM refunds WHERE order_id = ${first.orderId} AND
+             (status = 'COMPLETED' OR id IN (${sql.join(
+               refundIds.map((id) => sql`${id}`),
+               sql`, `,
+             )})))
+          <= (SELECT max(amount) FROM transactions WHERE order_id = ${first.orderId} AND provider = 'VNPAY' AND status = 'SUCCESS')
+          AS safe
+      `);
+      if (!safety?.safe) return false;
+      const ready = await tx
+        .select({ id: refunds.id })
+        .from(refunds)
         .where(
-          inArray(
-            refunds.id,
-            updated.map((r) => r.id),
+          and(
+            inArray(refunds.id, refundIds),
+            eq(refunds.orderId, first.orderId),
+            eq(refunds.status, RefundStatus.PENDING),
           ),
-        );
-    }
-    return false;
+        )
+        .for("update");
+      if (ready.length !== refundIds.length) return false;
+      await tx
+        .update(refunds)
+        .set({ status: RefundStatus.PROCESSING, updatedAt: now })
+        .where(inArray(refunds.id, refundIds));
+      return true;
+    });
+  }
+
+  async scheduleVerification(
+    eventId: string,
+    attempts: number,
+    nextRetryAt: Date,
+  ) {
+    await db
+      .update(outbox)
+      .set({
+        status: OutboxStatus.PENDING,
+        retryCount: attempts,
+        nextRetryAt,
+        errorMessage: "REFUND_QUERYDR_PENDING",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(outbox.id, eventId), eq(outbox.status, OutboxStatus.PROCESSING)),
+      );
   }
 
   async complete(input: {
@@ -162,6 +208,10 @@ export class DrizzleRefundProcessingStore implements RefundProcessingStore {
             ),
           );
       }
+      await tx.insert(outbox).values({
+        eventType: "REFUND_COMPLETED",
+        payload: { orderId: input.orderId, refundIds: input.refundIds },
+      });
       await tx
         .update(outbox)
         .set({
@@ -229,18 +279,45 @@ export class DrizzleRefundProcessingStore implements RefundProcessingStore {
           updatedAt: input.now,
         })
         .where(eq(outbox.id, input.eventId));
+      if (input.giveUp)
+        await tx.insert(auditLog).values({
+          actorRole: "SYSTEM",
+          action: "VNPAY_REFUND_MANUAL_REVIEW",
+          targetType: "OUTBOX",
+          targetId: input.eventId,
+          changes: {
+            attempts: input.retryCount,
+            reason: "REFUND_PROVIDER_UNREACHABLE",
+          },
+        });
     });
   }
 
   async failEvent(eventId: string, message: string, now: Date): Promise<void> {
-    await db
-      .update(outbox)
-      .set({
-        status: OutboxStatus.FAILED,
-        errorMessage: message,
-        updatedAt: now,
-      })
-      .where(eq(outbox.id, eventId));
+    await db.transaction(async (tx) => {
+      const [failed] = await tx
+        .update(outbox)
+        .set({
+          status: OutboxStatus.FAILED,
+          errorMessage: message,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(outbox.id, eventId),
+            eq(outbox.status, OutboxStatus.PROCESSING),
+          ),
+        )
+        .returning({ id: outbox.id });
+      if (failed)
+        await tx.insert(auditLog).values({
+          actorRole: "SYSTEM",
+          action: "VNPAY_REFUND_MANUAL_REVIEW",
+          targetType: "OUTBOX",
+          targetId: eventId,
+          changes: { reason: message },
+        });
+    });
   }
 
   async annotateUncertain(

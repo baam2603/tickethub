@@ -14,7 +14,8 @@
     "start:email-worker": "tsx src/contexts/notification/interface/email.worker.ts",
     "start:outbox-dispatcher": "tsx src/contexts/notification/interface/outbox.dispatcher.ts",
     "start:outbox-recovery": "tsx src/contexts/notification/interface/outbox-recovery.ts",
-    "start:refund-processor": "tsx src/contexts/payment/interface/refund-processor.ts"
+    "start:refund-processor": "tsx src/contexts/payment/interface/refund-processor.ts",
+    "start:payment-email": "tsx src/contexts/payment/payment-email.worker.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1164.0",

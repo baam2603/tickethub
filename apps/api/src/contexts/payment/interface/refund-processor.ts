@@ -1,7 +1,9 @@
+import { VnpayQueryGateway } from "../infrastructure/vnpay-query.gateway";
 /**
  * Tien trinh nen: tieu thu outbox REFUND_REQUESTED va goi API hoan tien VNPay.
  * Can ENABLE_VNPAY_REFUND_PROCESSING=true va thong tin dang nhap VNPay that.
  */
+import { isIP } from "node:net";
 import { env } from "../../../config/env.config";
 import { sqlClient } from "../../../database/db";
 import { ProcessRefundRequestsUseCase } from "../application/process-refund-requests.use-case";
@@ -16,6 +18,13 @@ async function main() {
     VNPAY_HASH_SECRET: env.VNPAY_HASH_SECRET,
   });
 
+  const endpoint = new URL(env.VNPAY_API_URL);
+  if (endpoint.protocol !== "https:")
+    throw new Error("VNPay refund endpoint requires HTTPS");
+  const refundIp = process.env.VNPAY_REFUND_IP?.trim();
+  if (!refundIp || !isIP(refundIp))
+    throw new Error("Set VNPAY_REFUND_IP to the merchant's configured IP");
+
   const useCase = new ProcessRefundRequestsUseCase(
     new DrizzleRefundProcessingStore(),
     new VnpayRefundGateway({
@@ -23,8 +32,9 @@ async function main() {
       tmnCode: env.VNPAY_TMN_CODE,
       hashSecret: env.VNPAY_HASH_SECRET,
     }),
-    { ipAddress: "127.0.0.1", createBy: "tickethub-system" },
+    { ipAddress: refundIp, createBy: "tickethub-system" },
     console,
+    new VnpayQueryGateway(),
   );
   await useCase.run();
 }

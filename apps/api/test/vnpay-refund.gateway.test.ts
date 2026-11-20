@@ -83,6 +83,18 @@ describe("VnpayRefundGateway", () => {
     }
   });
 
+  it("keeps a correctly signed pending or wrong-amount refund unconfirmed", async () => {
+    for (const behavior of [{ transactionStatus: "05" }, { amount: "100" }]) {
+      server = await startFakeVnpayServer(behavior);
+      assert.equal(
+        (await gatewayFor(server.url).refund(request)).kind,
+        "UNKNOWN",
+      );
+      await server.close();
+      server = null;
+    }
+  });
+
   it("does not trust a response with an invalid signature, even with code 00", async () => {
     server = await startFakeVnpayServer({ badSignature: true });
     const result = await gatewayFor(server.url).refund(request);

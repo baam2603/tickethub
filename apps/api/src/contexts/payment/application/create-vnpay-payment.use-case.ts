@@ -1,3 +1,4 @@
+import { PaymentDomainError } from "../domain/payment.errors";
 import type { CreatedPayment } from "../domain/payment.models";
 import type { PaymentGateway } from "../domain/payment-gateway";
 import type { CheckoutUnitOfWork } from "../domain/payment.ports";
@@ -28,19 +29,42 @@ export class CreateVnpayPaymentUseCase {
     userId: string,
     orderId: string,
     clientIp: string,
+    idempotencyKey?: string,
   ): Promise<CreatedPayment> {
+    if (
+      idempotencyKey !== undefined &&
+      !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(idempotencyKey)
+    )
+      throw new PaymentDomainError(
+        "BAD_REQUEST",
+        "Idempotency-Key must be a UUID",
+      );
     return this.unitOfWork.run(async (tx) => {
       const order = assertOrderPayable(
         await tx.lockOwnedOrder(userId, orderId),
         new Date(),
       );
 
+      const key = idempotencyKey
+        ? `vnpay:${userId}:${idempotencyKey.toLowerCase()}`
+        : `vnpay:${order.id}`;
+      await tx.claimIdempotencyKey(key, order.id);
       const existing = await tx.lockVnpayTransaction(order.id);
       assertExistingTransactionReusable(existing, order);
 
       const amountVnd = resolveAmountVnd(order);
       const transactionRef =
         existing?.transactionRef ?? generateTransactionRef();
+
+      if (existing?.paymentUrl)
+        return {
+          orderId: order.id,
+          orderCode: order.orderCode,
+          transactionRef,
+          paymentUrl: existing.paymentUrl,
+          amountVnd,
+          expiresAt: order.expiresAt.toISOString(),
+        };
 
       // Han thanh toan khong vuot qua thoi gian giu ve cua Booking
       const payment = await this.gateway.createPaymentUrl({
@@ -58,8 +82,9 @@ export class CreateVnpayPaymentUseCase {
           orderId: order.id,
           transactionRef,
           amount: order.finalAmount,
-          idempotencyKey: `vnpay:${order.id}`,
+          idempotencyKey: key,
           createDate: payment.createDate,
+          paymentUrl: payment.paymentUrl,
         });
       }
 

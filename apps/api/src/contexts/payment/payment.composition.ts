@@ -1,3 +1,7 @@
+import { sqlClient } from "../../database/db";
+import { processPaymentEmails } from "./infrastructure/payment-email-worker";
+import { QueryVnpayPaymentUseCase } from "./application/query-vnpay-payment.use-case";
+import { VnpayQueryGateway } from "./infrastructure/vnpay-query.gateway";
 import { env } from "../../config/env.config";
 import { CreateVnpayPaymentUseCase } from "./application/create-vnpay-payment.use-case";
 import { PreviewVnpayIpnUseCase } from "./application/preview-vnpay-ipn.use-case";
@@ -35,18 +39,32 @@ export function createPaymentUseCases(
 ) {
   const gateway = overrides.gateway ?? new VnpayGateway();
   const query = overrides.query ?? new DrizzlePaymentQuery();
+  const processIpn = new ProcessVnpayIpnUseCase(
+    gateway,
+    query,
+    overrides.ipn ?? new DrizzleIpnUnitOfWork(),
+    overrides.notifier ?? new EventSettlementNotifier(cache, seatStream),
+  );
   return {
     createPayment: new CreateVnpayPaymentUseCase(
       overrides.checkout ?? new DrizzleCheckoutUnitOfWork(),
       gateway,
       { returnUrl: env.VNPAY_RETURN_URL },
     ),
-    processIpn: new ProcessVnpayIpnUseCase(
-      gateway,
-      query,
-      overrides.ipn ?? new DrizzleIpnUnitOfWork(),
-      overrides.notifier ?? new EventSettlementNotifier(cache, seatStream),
+    processIpn,
+    queryVnpay: new QueryVnpayPaymentUseCase(
+      new DrizzlePaymentQuery(),
+      new VnpayQueryGateway(),
+      processIpn,
     ),
     previewIpn: new PreviewVnpayIpnUseCase(gateway, query),
   };
+}
+
+export async function runPaymentEmailWorker() {
+  try {
+    await processPaymentEmails();
+  } finally {
+    await sqlClient.end();
+  }
 }

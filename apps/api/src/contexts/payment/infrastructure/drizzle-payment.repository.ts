@@ -27,6 +27,7 @@ import {
   canRestoreStanding,
   planLateRefund,
 } from "../domain/late-payment-rules";
+import { PaymentDomainError, paymentErrors } from "../domain/payment.errors";
 import { buildCallbackEvidence, generateTicketCode } from "../domain/ipn-rules";
 import type {
   PaymentOrder,
@@ -81,7 +82,40 @@ class DrizzleCheckoutTransaction implements CheckoutTransaction {
       .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
       .limit(1)
       .for("update");
-    return order ? toOrder(order) : null;
+    if (!order) return null;
+    const [snapshot] = await this.tx
+      .select({
+        valid: sql<boolean>`coalesce(bool_and(
+        ${orderItems.quantity} > 0 AND ${orderItems.unitPrice} >= 0 AND
+        ${orderItems.unitPrice} * ${orderItems.quantity} = ${orderItems.subtotal}
+      ), false) AND coalesce(sum(${orderItems.subtotal}), 0) = ${order.totalAmount}::numeric
+        AND ${order.totalAmount}::numeric - ${order.discountAmount}::numeric = ${order.finalAmount}::numeric
+        AND ${order.discountAmount}::numeric >= 0`,
+      })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, order.id));
+    if (
+      !snapshot?.valid ||
+      (Number(order.discountAmount) > 0 && !order.voucherCode?.trim())
+    )
+      throw paymentErrors.amountMismatch();
+    return toOrder(order);
+  }
+
+  async claimIdempotencyKey(key: string, orderId: string) {
+    await this.tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
+    );
+    const [claimed] = await this.tx
+      .select({ orderId: transactions.orderId })
+      .from(transactions)
+      .where(eq(transactions.idempotencyKey, key))
+      .limit(1);
+    if (claimed && claimed.orderId !== orderId)
+      throw new PaymentDomainError(
+        "CONFLICT",
+        "Idempotency key belongs to another order",
+      );
   }
 
   async lockVnpayTransaction(
@@ -93,6 +127,9 @@ class DrizzleCheckoutTransaction implements CheckoutTransaction {
         transactionRef: transactions.transactionRef,
         status: transactions.status,
         amount: transactions.amount,
+        paymentUrl: sql<
+          string | null
+        >`${transactions.rawCallback}->>'checkoutUrl'`,
       })
       .from(transactions)
       .where(
@@ -112,9 +149,13 @@ class DrizzleCheckoutTransaction implements CheckoutTransaction {
     amount: string;
     idempotencyKey: string;
     createDate: string;
+    paymentUrl: string;
   }) {
     await this.tx.insert(transactions).values({
-      rawCallback: { vnp_CreateDate: input.createDate },
+      rawCallback: {
+        vnp_CreateDate: input.createDate,
+        checkoutUrl: input.paymentUrl,
+      },
       orderId: input.orderId,
       provider: PaymentProvider.VNPAY,
       transactionRef: input.transactionRef,
@@ -179,7 +220,7 @@ class DrizzleIpnTransaction implements IpnTransaction {
     await this.tx
       .update(transactions)
       .set({
-        rawCallback: evidence,
+        rawCallback: sql`(coalesce(${transactions.rawCallback}, '{}'::jsonb) - 'checkoutUrl') || ${JSON.stringify(evidence)}::jsonb`,
         responseCode: params.vnp_ResponseCode ?? null,
         providerTxNumber: input.providerTxNumber,
         updatedAt: new Date(),
@@ -500,7 +541,7 @@ class DrizzleIpnTransaction implements IpnTransaction {
         providerTxNumber: input.providerTxNumber,
         bankCode: input.params.vnp_BankCode ?? null,
         // Gop vao du lieu da luu (vnp_CreateDate) thay vi ghi de
-        rawCallback: sql`coalesce(${transactions.rawCallback}, '{}'::jsonb) || ${JSON.stringify(input.params)}::jsonb`,
+        rawCallback: sql`(coalesce(${transactions.rawCallback}, '{}'::jsonb) - 'checkoutUrl') || ${JSON.stringify(buildCallbackEvidence(input.params))}::jsonb`,
         updatedAt: input.now,
       })
       .where(eq(transactions.id, input.transactionId));
@@ -584,6 +625,36 @@ export class DrizzlePaymentQuery implements PaymentQueryPort {
       .where(eq(transactions.transactionRef, transactionRef))
       .limit(1);
     return row ? toTransaction(row) : null;
+  }
+
+  async findOwnedPayment(
+    userId: string,
+    filter: { orderId: string } | { transactionRef: string },
+  ) {
+    const [found, duplicate] = await db
+      .select({
+        orderId: orders.id,
+        orderCode: orders.orderCode,
+        orderStatus: orders.status,
+        transactionStatus: transactions.status,
+        transactionRef: transactions.transactionRef,
+        createDate: sql<
+          string | null
+        >`${transactions.rawCallback}->>'vnp_CreateDate'`,
+      })
+      .from(transactions)
+      .innerJoin(orders, eq(orders.id, transactions.orderId))
+      .where(
+        and(
+          eq(orders.userId, userId),
+          eq(transactions.provider, PaymentProvider.VNPAY),
+          "orderId" in filter
+            ? eq(orders.id, filter.orderId)
+            : eq(transactions.transactionRef, filter.transactionRef),
+        ),
+      )
+      .limit(2);
+    return duplicate ? null : (found ?? null);
   }
 
   async findOrder(orderId: string) {

@@ -4,6 +4,7 @@ export interface RefundOutboxEvent {
   id: string;
   payload: unknown;
   retryCount: number;
+  verifying?: boolean;
 }
 
 export interface RefundOrderContext {
@@ -28,6 +29,7 @@ export interface RefundProcessingStore {
   claim(eventId: string, now: Date): Promise<boolean>;
   loadContext(
     payload: RefundRequestedPayload,
+    verifying?: boolean,
   ): Promise<RefundOrderContext | null>;
   /** PENDING -> PROCESSING cho cac ban ghi hoan tien; false neu so dong khong khop. */
   markRefundsProcessing(refundIds: string[], now: Date): Promise<boolean>;
@@ -62,6 +64,11 @@ export interface RefundProcessingStore {
   }): Promise<void>;
   /** Het so lan thu hoac du lieu khong hop le: outbox FAILED (refunds giu nguyen de doi soat). */
   failEvent(eventId: string, message: string, now: Date): Promise<void>;
+  scheduleVerification?(
+    eventId: string,
+    attempts: number,
+    nextRetryAt: Date,
+  ): Promise<void>;
   /** Ket qua khong chac chan: chi ghi chu loi, giu PROCESSING de doi soat thu cong. */
   annotateUncertain(eventId: string, message: string, now: Date): Promise<void>;
 }

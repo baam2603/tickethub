@@ -1,5 +1,5 @@
 import { ApiError, apiClient } from "@/shared/api/client";
-import type { RawOrder, Recipient } from "../domain/checkout-rules";
+import type { RawOrder } from "../domain/checkout-rules";
 
 /** Tai don hang cua nguoi mua tu backend; nem loi neu that bai. */
 export async function fetchOrder(orderId: string): Promise<RawOrder | null> {
@@ -20,27 +20,13 @@ export async function releaseOrderBestEffort(orderId: string): Promise<void> {
   }
 }
 
-export interface PaymentRequest {
-  orderId: string;
-  paymentMethod: "vnpay_qr" | "vnpay_atm" | "vnpay_intl";
-  voucherCode: string | null;
-  recipient: Recipient;
-}
-
-/** Tao URL thanh toan VNPay; tra ve URL hoac null neu backend khong tra ve. */
+/** Tạo URL từ đơn do máy chủ quản lý. */
 export async function createVnpayPayment(
-  req: PaymentRequest,
+  orderId: string,
 ): Promise<string | null> {
   const payment = await apiClient<{ paymentUrl?: string } | null>(
-    `/payments/orders/${req.orderId}/vnpay`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        paymentMethod: req.paymentMethod,
-        voucherCode: req.voucherCode,
-        recipient: req.recipient,
-      }),
-    },
+    `/payments/orders/${orderId}/vnpay`,
+    { method: "POST" },
   );
   return payment?.paymentUrl ?? null;
 }

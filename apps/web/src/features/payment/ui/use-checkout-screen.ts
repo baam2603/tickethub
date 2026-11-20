@@ -8,14 +8,8 @@ import { EVENTS } from "@/features/event";
 
 import {
   DEFAULT_ORDER,
-  GUEST_PREFILL,
-  computeTotals,
-  evaluateVoucher,
-  fallbackOrder,
   mapOrderResponse,
   secondsUntil,
-  splitFullName,
-  validateRecipient,
   paymentFailureMessage,
   MISSING_PAYMENT_URL_MESSAGE,
   type CheckoutOrder,
@@ -58,41 +52,9 @@ export function useCheckoutScreen() {
   ];
   const [currentSlide, setCurrentSlide] = useState(0);
 
-  // Form states for checkout payment modal
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<
-    "vnpay_qr" | "vnpay_atm" | "vnpay_intl"
-  >("vnpay_qr");
-  const [voucherCode, setVoucherCode] = useState("");
-  const [voucherDiscount, setVoucherDiscount] = useState(0);
-  const [voucherAppliedCode, setVoucherAppliedCode] = useState<string | null>(
-    null,
-  );
-  const [voucherError, setVoucherError] = useState<string | null>(null);
   const [isSubmittingPayment, startPaymentTransition] = useTransition();
   const [paymentError, setPaymentError] = useState<string | null>(null);
-
-  // Autofill user info if authenticated
-  useEffect(() => {
-    queueMicrotask(() => {
-      if (user) {
-        if (user.fullName) {
-          const name = splitFullName(user.fullName);
-          setFirstName(name.firstName);
-          setLastName(name.lastName);
-        }
-        if (user.email) setEmail(user.email);
-      } else {
-        setFirstName(GUEST_PREFILL.firstName);
-        setLastName(GUEST_PREFILL.lastName);
-        setEmail(GUEST_PREFILL.email);
-        setPhone(GUEST_PREFILL.phone);
-      }
-    });
-  }, [user]);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   // Load real order data from backend if orderId is provided
   useEffect(() => {
@@ -104,21 +66,26 @@ export function useCheckoutScreen() {
     async function loadOrder() {
       try {
         const raw = await fetchOrder(orderId as string);
-        if (isMounted && raw) {
+        if (!raw) throw new Error("Order not found");
+        if (isMounted) {
           const mappedOrder = mapOrderResponse(
             raw,
             orderId as string,
             Date.now(),
           );
           setOrder(mappedOrder);
+          setOrderError(null);
           if (mappedOrder.expiresAt) {
             const diff = secondsUntil(mappedOrder.expiresAt, Date.now());
             setSecondsLeft(diff);
-            if (diff <= 0) setIsExpired(true);
+            setIsExpired(diff <= 0);
           }
         }
       } catch {
-        if (isMounted) setOrder(fallbackOrder(orderId));
+        if (isMounted)
+          setOrderError(
+            "Không thể tải đơn hàng. Vui lòng đăng nhập đúng tài khoản hoặc thử lại.",
+          );
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -138,9 +105,18 @@ export function useCheckoutScreen() {
     }
   }, [order.orderId]);
 
+  const hasOrder = Boolean(
+    orderId && order.orderId === orderId && !isLoading && !orderError,
+  );
+  const canPay =
+    hasOrder &&
+    order.status === "PENDING" &&
+    !isExpired &&
+    order.finalAmount > 0;
+
   // Countdown timer logic
   useEffect(() => {
-    if (isLoading || isExpired) return;
+    if (!canPay) return;
 
     const interval = setInterval(() => {
       setSecondsLeft((prev) => {
@@ -154,7 +130,7 @@ export function useCheckoutScreen() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isLoading, isExpired, handleExpireRelease]);
+  }, [canPay, handleExpireRelease]);
 
   const confirmCancelHold = async () => {
     setIsCancelling(true);
@@ -166,54 +142,28 @@ export function useCheckoutScreen() {
     }
   };
 
-  const handleApplyVoucher = () => {
-    setVoucherError(null);
-    const result = evaluateVoucher(voucherCode, order.totalAmount);
-    if (result.ok) {
-      setVoucherDiscount(result.discount);
-      setVoucherAppliedCode(result.code);
-      setVoucherError(null);
-    } else {
-      setVoucherDiscount(0);
-      setVoucherAppliedCode(null);
-      setVoucherError(result.error);
-    }
-  };
-
   const handlePaymentSubmit = () => {
+    if (!canPay) return;
     setPaymentError(null);
-    const recipient = { firstName, lastName, email, phone };
-    const invalid = validateRecipient(recipient);
-    if (invalid) {
-      setPaymentError(invalid);
-      return;
-    }
-
     startPaymentTransition(async () => {
       try {
-        const paymentUrl = await createVnpayPayment({
-          orderId: order.orderId,
-          paymentMethod,
-          voucherCode: voucherAppliedCode,
-          recipient,
-        });
-
-        if (paymentUrl) {
-          window.location.href = paymentUrl;
-        } else {
-          // Khong co URL thanh toan: bao loi, tuyet doi khong gia lap thanh cong
+        const paymentUrl = await createVnpayPayment(order.orderId);
+        if (!paymentUrl) {
           setPaymentError(MISSING_PAYMENT_URL_MESSAGE);
+          return;
         }
+        const target = new URL(paymentUrl);
+        if (
+          target.protocol !== "https:" ||
+          !["sandbox.vnpayment.vn", "pay.vnpay.vn"].includes(target.hostname)
+        )
+          throw new Error("Invalid VNPay checkout URL");
+        window.location.assign(target.href);
       } catch (err) {
         setPaymentError(paymentFailureMessage(paymentErrorStatus(err)));
       }
     });
   };
-
-  const { subtotal, platformFee, finalTotal } = computeTotals(
-    order.totalAmount,
-    voucherDiscount,
-  );
 
   const eventData = EVENTS.find((e) => e.id === order.eventId) || EVENTS[0];
   const ticketItem = order.items[0] || DEFAULT_ORDER.items[0];
@@ -233,29 +183,19 @@ export function useCheckoutScreen() {
     carouselImages,
     currentSlide,
     setCurrentSlide,
-    firstName,
-    setFirstName,
-    lastName,
-    setLastName,
-    email,
-    setEmail,
-    phone,
-    setPhone,
-    paymentMethod,
-    setPaymentMethod,
-    voucherCode,
-    setVoucherCode,
-    voucherDiscount,
-    voucherAppliedCode,
-    voucherError,
+    email: user?.email,
+    hasOrder,
+    canPay,
+    isLoading,
+    orderError,
+    voucherDiscount: order.discountAmount,
+    voucherAppliedCode: order.voucherCode,
     isSubmittingPayment,
     paymentError,
     confirmCancelHold,
-    handleApplyVoucher,
     handlePaymentSubmit,
-    subtotal,
-    platformFee,
-    finalTotal,
+    subtotal: order.totalAmount,
+    finalTotal: order.finalAmount,
     eventData,
     ticketItem,
   };

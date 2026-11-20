@@ -12,6 +12,8 @@ export const FAKE_HASH_SECRET = "fake-refund-secret-for-tests-only";
 export interface FakeBehavior {
   /** Ma vnp_ResponseCode tra ve (mac dinh 00). */
   responseCode?: string;
+  transactionStatus?: string;
+  amount?: string;
   /** Ky sai phan hoi. */
   badSignature?: boolean;
   /** Tra ve noi dung khong phai JSON. */
@@ -86,12 +88,12 @@ export async function startFakeVnpayServer(
         vnp_Message: "Fake message",
         vnp_TmnCode: body.vnp_TmnCode ?? "",
         vnp_TxnRef: body.vnp_TxnRef ?? "",
-        vnp_Amount: body.vnp_Amount ?? "",
+        vnp_Amount: state.amount ?? body.vnp_Amount ?? "",
         vnp_BankCode: "NCB",
         vnp_PayDate: "20260101000000",
         vnp_TransactionNo: "99" + String(requests.length).padStart(6, "0"),
         vnp_TransactionType: body.vnp_TransactionType ?? "",
-        vnp_TransactionStatus: "05",
+        vnp_TransactionStatus: state.transactionStatus ?? "00",
         vnp_OrderInfo: body.vnp_OrderInfo ?? "",
       };
       const hash = sign(refundResponseSignData(response));

@@ -11,6 +11,7 @@ import type {
 export interface CheckoutTransaction {
   /** Khoa don hang cua chinh nguoi mua (FOR UPDATE) de tranh tao hai giao dich. */
   lockOwnedOrder(userId: string, orderId: string): Promise<PaymentOrder | null>;
+  claimIdempotencyKey(key: string, orderId: string): Promise<void>;
   lockVnpayTransaction(
     orderId: string,
   ): Promise<PendingVnpayTransaction | null>;
@@ -21,6 +22,7 @@ export interface CheckoutTransaction {
     idempotencyKey: string;
     /** vnp_CreateDate cua URL thanh toan dau tien, luu de dung khi hoan tien. */
     createDate: string;
+    paymentUrl: string;
   }): Promise<void>;
 }
 
